@@ -13,5 +13,8 @@ def fetch_twse_stock_master():
     df.to_csv("data/raw/master/stock_list.csv", index=False, encoding="utf-8")
     print(f"Saved {len(df)} records to data/raw/master/stock_list.csv")
 
-if __name__ == "__main__":
+def run(target_date=None):
     fetch_twse_stock_master()
+
+if __name__ == "__main__":
+    run()
