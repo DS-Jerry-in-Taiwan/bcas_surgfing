@@ -17,6 +17,9 @@ def fetch_tpex_cb_master():
     resp.encoding = "utf-8"
     soup = BeautifulSoup(resp.text, "html.parser")
     table = soup.find("table")
+    if table is None:
+        print("[WARNING] TPEx CB Master: 無法取得 table，可能被反爬或網頁結構異動")
+        return
     rows = table.find_all("tr")
     data = []
     for row in rows[1:]:
@@ -31,5 +34,8 @@ def fetch_tpex_cb_master():
     df.to_csv("data/raw/master/cb_list.csv", index=False, encoding="utf-8")
     print(f"Saved {len(df)} records to data/raw/master/cb_list.csv")
 
-if __name__ == "__main__":
+def run(target_date=None):
     fetch_tpex_cb_master()
+
+if __name__ == "__main__":
+    run()
