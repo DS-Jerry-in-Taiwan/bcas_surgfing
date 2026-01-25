@@ -4,11 +4,14 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Data pipeline: 不推送大檔案與中間檔
+data/raw/*
+!data/raw/.gitkeep
 data/raw/cb_daily/
 data/raw/daily_samples/
 data/processed/
+docs/agent_context/
 
 # 其他暫存或測試檔
 *.tmp
 *.log
-*.bak
+*.bakdocs/agent_context/
