@@ -9,9 +9,28 @@ data/raw/*
 data/raw/cb_daily/
 data/raw/daily_samples/
 data/processed/
-docs/agent_context/
+data/clean/*
+!data/clean/.gitkeep
+data/test_clean/
+data/test_raw/
+logs/
+*.log
+*.tmp
+*.bak
+
+# DB/環境
+.env
+.env.*
+*.sqlite
+*.db
+pgdata/
+
+# Jupyter
+notebooks/.ipynb_checkpoints/
 
 # 其他暫存或測試檔
 *.tmp
 *.log
-*.bakdocs/agent_context/
+*.bak
+
+# 文件暫存
