@@ -31,13 +31,26 @@ def run_pipeline(task, date, logger):
             logger.info("Done: Stock Master")
             logger.info("Start: CB Master")
             from crawlers.master import cb_master
-            cb_master.run()
+            cb_master.run(date)
             logger.info("Done: CB Master")
         if task in ("daily", "all"):
             logger.info(f"Start: TPEx CB Daily ({date})")
             from crawlers import tpex_daily
             tpex_daily.run(target_date=date)
             logger.info("Done: TPEx CB Daily")
+            # 整合清洗與入庫
+            logger.info("Start: Cleaner (batch_clean)")
+            from etl import cleaner
+            cleaner.batch_clean()
+            logger.info("Done: Cleaner")
+            logger.info("Start: Validate & Enrich (daily/master)")
+            from etl import validate_and_enrich
+            validate_and_enrich.validate_and_enrich(logger)
+            logger.info("Done: Validate & Enrich")
+            logger.info("Start: Importer (DB ingest)")
+            from etl import importer
+            importer.main()
+            logger.info("Done: Importer")
     except Exception as e:
         logger.critical(f"Pipeline failed: {e}", exc_info=True)
         raise
