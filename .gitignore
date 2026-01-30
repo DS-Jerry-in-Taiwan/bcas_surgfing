@@ -28,6 +28,8 @@ pgdata/
 
 # Jupyter
 notebooks/.ipynb_checkpoints/
+notebooks/*.html
+notebooks/*.pdf
 
 # 其他暫存或測試檔
 *.tmp
