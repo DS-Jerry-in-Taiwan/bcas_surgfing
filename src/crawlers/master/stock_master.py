@@ -6,6 +6,9 @@ def fetch_twse_stock_master():
     resp = requests.get(url, timeout=10)
     data = resp.json().get("data", [])
     # 欄位順序: [代號, 名稱, ...]
+    if not data:
+        print("No data found for stock master, skip.")
+        return
     df = pd.DataFrame(data, columns=["symbol", "name"] + [f"col{i}" for i in range(len(data[0])-2)])
     # 僅保留4碼普通股
     df = df[df["symbol"].str.len() == 4]

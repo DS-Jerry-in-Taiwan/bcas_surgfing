@@ -1,30 +1,36 @@
-# Data Profile Report (2026-01)
+# TPEx CB Daily 數據品質報告（2024-03-07）
 
-## 1. TWSE 現股日成交資訊（2330）
+## 1. 欄位型態與缺值統計
 
-- 檔案：data/raw/stock/2026-01_stock.json
-- 欄位檢查：
-  - 日期格式：民國年已轉換為西元年
-  - 數值欄位（Open/High/Low/Close/Volume）均為數字型態
-- 重複資料：無
-- High 是否永遠 >= Low：通過檢查
-- 缺值狀況：無 Null/0 值異常
-- 主鍵建議：日期 + 股票代碼
+| 欄位名稱 | 型態 | 缺值數量 |
+|----------|------|----------|
+| ...      | ...  | ...      |
 
-## 2. TPEx 可轉債日成交資訊
+（請由 @ANALYST 執行 notebooks/cb_daily_profile.ipynb 補齊實際統計）
 
-- 檔案：data/raw/cb/2026-01-25_cb.csv
-- 欄位檢查：
-  - 日期格式：YYYY-MM-DD
-  - Volume 欄位為 0 時，Price 欄位檢查無異常
-- 重複資料：無
-- High 是否永遠 >= Low：通過檢查
-- 缺值狀況：無 Null/0 值異常
-- 主鍵建議：日期 + CB 代碼
+---
 
-## 3. 結論與建議
+## 2. 重複資料檢查
 
-- 兩份數據格式與品質均符合預期
-- 建議 Schema：
-  - 現股：date, stock_id, open, high, low, close, volume
-  - CB：date, cb_id, open, high, low, close, volume, price
+- 重複資料筆數：`0`（預設）
+
+---
+
+## 3. 異常值檢查
+
+- High < Low 筆數：`0`（預設）
+- Volume 為 0 筆數：`0`（預設）
+
+---
+
+## 4. Schema 建議
+
+```sql
+CREATE TABLE tpex_cb_daily (
+  -- 請參考 notebook 輸出 SQL 定義
+);
+```
+
+---
+
+> 本報告為自動產生樣板，請由 @ANALYST 執行 notebook 補齊實際統計與建議。
