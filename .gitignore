@@ -2,6 +2,7 @@
 *.pyc
 __pycache__/
 .ipynb_checkpoints/
+.venv/
 
 # Data pipeline: 不推送大檔案與中間檔
 data/raw/*
@@ -34,3 +35,5 @@ notebooks/.ipynb_checkpoints/
 *.bak
 
 # 文件暫存
+
+docs/agent_context/
