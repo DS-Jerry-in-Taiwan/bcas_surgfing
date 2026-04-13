@@ -41,3 +41,4 @@ notebooks/*.pdf
 docs/agent_context/
 data/enriched/
 data/tmp/
+docs/*.csv
