@@ -39,3 +39,5 @@ notebooks/*.pdf
 # 文件暫存
 
 docs/agent_context/
+data/enriched/
+data/tmp/
