@@ -38,10 +38,13 @@ def upsert_cb_daily(conn, df):
         records = df.to_dict("records")
         # 根據清洗後表頭調整欄位
         sql = """
-        INSERT INTO cb_daily (symbol, date, close, volume)
+        INSERT INTO cb_daily (symbol, date, close, volume, convert_price, bond_short_name)
         VALUES %s
         ON CONFLICT (symbol, date) DO UPDATE
-        SET close=EXCLUDED.close, volume=EXCLUDED.volume;
+        SET close=EXCLUDED.close,
+            volume=EXCLUDED.volume,
+            convert_price=EXCLUDED.convert_price,
+            bond_short_name=EXCLUDED.bond_short_name;
         """
         def safe_int(val):
             try:
@@ -52,12 +55,21 @@ def upsert_cb_daily(conn, df):
             except Exception:
                 return None
 
+        def safe_float(val):
+            try:
+                v = float(val)
+                return v if not pd.isnull(v) else None
+            except Exception:
+                return None
+
         values = [
             (
                 r["代號"],
                 r["日期"],
                 r.get("收市", None),   # 若有「收盤」欄位請改為 r.get("收盤", None)
-                safe_int(r.get("筆數", None))    # robust 處理
+                safe_int(r.get("筆數", None)),
+                safe_float(r.get("轉換價格", None)),
+                r.get("債券簡稱", None)
             )
             for r in records
         ]

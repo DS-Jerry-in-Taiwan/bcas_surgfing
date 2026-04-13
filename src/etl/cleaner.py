@@ -4,8 +4,8 @@ import csv
 import re
 from datetime import datetime
 
-RAW_DIR = "data/raw/daily"
-CLEAN_DIR = "data/clean/daily"
+RAW_DIR = "data/raw/daily_cb"
+CLEAN_DIR = "data/clean/daily_cb"
 os.makedirs(CLEAN_DIR, exist_ok=True)
 
 def minguo_to_ad(minguo_str):
