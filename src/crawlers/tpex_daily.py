@@ -1,6 +1,6 @@
 import requests
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def get_tpex_cb_daily_csv_url(date=None):
     """
@@ -14,7 +14,7 @@ def get_tpex_cb_daily_csv_url(date=None):
     yyyymm = dt.strftime("%Y%m")
     yyyymmdd = dt.strftime("%Y%m%d")
     url = f"https://www.tpex.org.tw/storage/bond_zone/tradeinfo/cb/{dt.year}/{yyyymm}/RSta0113.{yyyymmdd}-C.csv"
-    out_path = f"data/raw/daily/tpex_cb_daily_{yyyymmdd}.csv"
+    out_path = f"data/raw/daily_cb/tpex_cb_daily_{yyyymmdd}.csv"
     return url, out_path
 
 def fetch_tpex_cb_daily_csv(date=None):

@@ -1,5 +1,6 @@
 import requests
 import pandas as pd
+import os
 
 def fetch_twse_stock_master():
     url = "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY_ALL?response=json"
@@ -13,8 +14,9 @@ def fetch_twse_stock_master():
     # 僅保留4碼普通股
     df = df[df["symbol"].str.len() == 4]
     df = df[["symbol", "name"]].reset_index(drop=True)
-    df.to_csv("data/raw/master/stock_list.csv", index=False, encoding="utf-8")
-    print(f"Saved {len(df)} records to data/raw/master/stock_list.csv")
+    os.makedirs("data/raw/master_stock", exist_ok=True)
+    df.to_csv("data/raw/master_stock/stock_list.csv", index=False, encoding="utf-8")
+    print(f"Saved {len(df)} records to data/raw/master_stock/stock_list.csv")
 
 def run(target_date=None):
     fetch_twse_stock_master()
