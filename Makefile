@@ -3,13 +3,13 @@
 all: fulltest
 
 crawl:
-	.venv/bin/python src/main_crawler.py  --task daily --date 2025-12-02
+	.venv/bin/python src/main_crawler.py  --task daily --date 2026-04-09
 
 clean:
 	.venv/bin/python src/etl/cleaner.py
 
 import:
-	.venv/bin/python src/importer.py
+	.venv/bin/python src/etl/importer.py
 
 test:
 	docker exec timescaledb psql -U postgres -d cbas -c "SELECT COUNT(*) FROM cb_daily;"

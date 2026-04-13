@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS cb_daily (
     date DATE,
     close NUMERIC,
     volume BIGINT,
+    convert_price NUMERIC(10,2),
+    bond_short_name VARCHAR(32),
     PRIMARY KEY (symbol, date)
 );
 
