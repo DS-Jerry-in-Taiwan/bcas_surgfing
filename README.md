@@ -1,5 +1,7 @@
 # BCAS Quant Data Pipeline (Phase 1.3 可轉債主檔建置)
 
+> **版本**: v1.3.0 | **狀態**: 開發中 | **最後更新**: 2026-04-13 | **Git 提交**: `bb06b28`
+
 ## 目錄結構建議
 
 ```
@@ -72,4 +74,70 @@ sequenceDiagram
 - 主檔（cb_list_master.csv、stock_list.csv）建議保留於 master/ 目錄，便於版本控管與驗證。
 - 若需跨月或全市場彙整，請調整腳本讀取多個年月資料夾。
 
----# bcas_surgfing
+---
+
+## 專案概覽與版本
+
+**版本**: v1.3.0 (對應 Phase 1.3)  
+**狀態**: 開發中  
+**最後更新**: 2026-04-13  
+**Git 提交**: `bb06b28`
+
+## 變更歷史
+
+### v1.3.0 (2026-04-13)
+- 新增可轉債主檔建置流程
+- 更新 ETL 處理邏輯 (`fc4b7b8`)
+- 新增反爬蟲技巧與下載指南文檔 (`b9896ff`)
+- 調整爬蟲輸出路徑與時間函式 (`51f459d`)
+- 更新 Makefile 路徑與 init.sql schema (`01e929f`)
+- 忽略 docs 目錄下的 CSV 數據檔案 (`bb06b28`)
+
+### v1.2.x (2026-01 ~ 2026-04)
+- 各階段開發紀錄見 `docs/agent_context/` 目錄
+- 包含 Phase 1.1 至 Phase 1.4 各子階段文件
+
+## 快速開始
+
+1. 克隆專案：
+   ```bash
+   git clone <repository-url>
+   cd bcas_quant
+   ```
+
+2. 安裝依賴（建議使用虛擬環境）：
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Linux/Mac
+   # 或 .venv\Scripts\activate  # Windows
+   pip install -r requirements.txt
+   ```
+
+3. 執行爬蟲：
+   ```bash
+   python src/crawlers/daily/tpex_csv_batch_fetcher.py
+   ```
+
+4. 產生主檔：
+   ```bash
+   python src/crawlers/master/cb_master_from_daily.py
+   ```
+
+## 貢獻與聯絡
+
+### 貢獻指南
+請參閱 `CONTRIBUTING.md`（待建立）。歡迎提交 Pull Request 或 Issue。
+
+### 文件目錄
+- `docs/agent_context/` - 各階段開發紀錄與上下文
+- `docs/agent_framework/` - Agent 架構規劃文件
+- `docs/daily_report/` - 團隊工作日誌
+- `docs/crawler_architecture/` - 爬蟲架構分析
+
+### 聯絡
+- 團隊：BCAS Quant 團隊
+- 專案維護：請透過專案 Issue 或團隊內部管道聯絡
+
+---
+
+*本文件最後更新於 2026-04-14*

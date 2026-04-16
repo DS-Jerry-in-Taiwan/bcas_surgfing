@@ -38,7 +38,16 @@ notebooks/*.pdf
 
 # 文件暫存
 
-docs/agent_context/
 data/enriched/
 data/tmp/
 docs/*.csv
+
+# OpenCode & Agent Context
+.opencode/
+opencode.jsonc
+data/
+logs/
+
+# Ignore agent session data but keep migration plans
+docs/agent_context/*
+!docs/agent_context/spider_migration_plan/

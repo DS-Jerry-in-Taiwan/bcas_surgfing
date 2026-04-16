@@ -3,3 +3,19 @@ requests
 beautifulsoup4
 tqdm
 lxml
+
+# Feapder Framework (optional - install if needed)
+# feapder
+
+# PostgreSQL Driver
+psycopg2-binary
+
+# Testing
+pytest>=8.0.0
+
+# Type Checking
+mypy
+types-requests
+
+# Environment
+python-dotenv
