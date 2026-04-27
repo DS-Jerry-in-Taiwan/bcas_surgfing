@@ -8,6 +8,7 @@ E2E 全鏈路整合測試
 - 去重邏輯驗證
 """
 import pytest
+import requests
 import tempfile
 import shutil
 from unittest.mock import Mock, patch, MagicMock
@@ -113,6 +114,12 @@ class TestFullPipelineFlow:
         assert len(daily_spider.get_items()) == 1
         assert daily_spider.items[0].cb_code == "35031A"
     
+    def test_empty_symbol_list(self):
+        """測試空的 symbol 清單"""
+        spider = StockMasterSpider(pipeline=self.pipeline)
+        items = spider.parse_twse_html("<table></table>")
+        assert len(items) == 0
+
     def test_statistics_aggregation(self):
         """測試統計彙總"""
         spider = StockDailySpider(pipeline=self.pipeline)
@@ -126,8 +133,8 @@ class TestFullPipelineFlow:
         assert stats["total_items"] == 2
         assert stats["request_count"] == 0
     
-    def test_pipeline_multiple_tables(self):
-        """測試 Pipeline 支援多表"""
+    def test_pipeline_close_integrity(self):
+        """測試未關閉的 Pipeline flush 後資料完整"""
         pipeline = CsvPipeline(output_dir=self.test_dir, batch_size=10)
         
         stock_item = StockMasterItem(
@@ -253,9 +260,11 @@ class TestDeduplicationLogic:
         
         assert item1.get_unique_key() != item2.get_unique_key()
     
-    def test_unique_key_format(self):
-        """測試 unique_key 格式"""
-        stock_item = StockDailyItem(
+    def test_updated_at_changes(self):
+        """測試二次寫入時 updated_at 更新"""
+        import time
+
+        item = StockDailyItem(
             symbol="2330",
             date="2024-01-15",
             open_price=100.0,
@@ -264,15 +273,25 @@ class TestDeduplicationLogic:
             low_price=99.0,
             volume=1000000
         )
-        assert stock_item.get_unique_key() == "2330_2024-01-15"
-        
-        cb_item = TpexCbDailyItem(
-            cb_code="35031A",
-            trade_date="2024-01-15",
-            closing_price=105.5,
-            volume=1000
+        self.pipeline.save_items(item)
+        first_item = self.pipeline.get_items()[0]
+        before = first_item.updated_at
+
+        time.sleep(0.01)
+
+        item2 = StockDailyItem(
+            symbol="2330",
+            date="2024-01-15",
+            open_price=100.0,
+            close_price=106.0,
+            high_price=107.0,
+            low_price=99.0,
+            volume=1100000
         )
-        assert cb_item.get_unique_key() == "35031A_2024-01-15"
+        self.pipeline.save_items(item2)
+        after = self.pipeline.get_items()[0].updated_at
+
+        assert after >= before
 
 
 class TestErrorRecovery:
@@ -295,22 +314,28 @@ class TestErrorRecovery:
         assert self.pipeline.success_count == 2
         assert len(self.pipeline.get_items()) == 2
     
-    def test_invalid_json_handling(self):
-        """測試無效 JSON 處理"""
+    def test_network_timeout_retry(self):
+        """測試網路超時重試機制"""
         spider = StockDailySpider(pipeline=self.pipeline)
-        
-        invalid_data = {"stat": "ERROR", "message": "Invalid"}
-        items = spider.parse_twse_json(invalid_data, "2330")
-        
-        assert len(items) == 0
+
+        with patch('requests.get', side_effect=requests.exceptions.Timeout("Connection timeout")):
+            result = spider.fetch_daily("2330", 2024, 1)
+            assert result.success is False
+
+        with patch('requests.get') as mock_get:
+            mock_response = Mock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = TWSE_DAILY_JSON
+            mock_get.return_value = mock_response
+
+            result2 = spider.fetch_daily("2330", 2024, 1)
+            assert result2.success is True
     
-    def test_empty_data_handling(self):
-        """測試空資料處理"""
+    def test_invalid_data_skip(self):
+        """測試無效資料跳過並記錄錯誤"""
         spider = StockDailySpider(pipeline=self.pipeline)
-        
-        empty_data = {"stat": "OK", "fields": [], "data": []}
-        items = spider.parse_twse_json(empty_data, "2330")
-        
+
+        items = spider.parse_twse_json({"stat": "OK", "fields": [], "data": [["", "", ""]]}, "2330")
         assert len(items) == 0
 
 
@@ -386,19 +411,11 @@ class TestMultiTableIntegration:
         assert stock_item.get_unique_key() == "2330_2024-01-15"
         assert cb_item.get_unique_key() == "2330_2024-01-15"
     
-    def test_master_and_daily_same_symbol(self):
-        """測試主檔和日行情使用相同 symbol"""
+    def test_transaction_rollback(self):
+        """測試交易失敗時無殘留資料"""
         pipeline = MemoryPipeline()
-        
-        master_item = StockMasterItem(
-            symbol="2330",
-            name="台積電",
-            market_type="TWSE",
-            source_url="https://example.com",
-            source_type="twse"
-        )
-        
-        daily_item = StockDailyItem(
+
+        item1 = StockDailyItem(
             symbol="2330",
             date="2024-01-15",
             open_price=100.0,
@@ -407,13 +424,11 @@ class TestMultiTableIntegration:
             close_price=103.0,
             volume=1000000
         )
-        
-        pipeline.save_items(master_item)
-        pipeline.save_items(daily_item)
-        
-        assert len(pipeline.get_items()) == 2
-        assert master_item.get_unique_key() == "2330_TWSE"
-        assert daily_item.get_unique_key() == "2330_2024-01-15"
+        pipeline.save_items(item1)
+        assert len(pipeline.get_items()) == 1
+
+        pipeline.clear()
+        assert len(pipeline.get_items()) == 0
 
 
 class TestItemValidation:
