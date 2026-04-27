@@ -1,6 +1,6 @@
 # BCAS Quant Data Pipeline (Phase 1.3 可轉債主檔建置)
 
-> **版本**: v1.3.0 | **狀態**: 開發中 | **最後更新**: 2026-04-13 | **Git 提交**: `bb06b28`
+> **版本**: v2.0.0 | **狀態**: 開發中 | **最後更新**: 2026-04-27 | **Git 提交**: `1966ef2`
 
 ## 目錄結構建議
 
@@ -78,24 +78,27 @@ sequenceDiagram
 
 ## 專案概覽與版本
 
-**版本**: v1.3.0 (對應 Phase 1.3)  
+**版本**: v2.0.0 (Feapder 遷移 + E2E 整合測試)  
 **狀態**: 開發中  
-**最後更新**: 2026-04-13  
-**Git 提交**: `bb06b28`
+**最後更新**: 2026-04-27  
+**Git 提交**: `1966ef2`
 
 ## 變更歷史
 
+### v2.0.0 (2026-04-27)
+- 遷移爬蟲系統至 Feapder + Agent 架構
+- 核心 Feapder 框架整合 (Phase 1): BaseSpider、Pipeline、Item 模型
+- Master 資料爬蟲遷移 (Phase 2): StockMasterSpider、CbMasterSpider
+- Daily 資料爬蟲遷移 (Phase 3): StockDailySpider、TpexCbDailySpider
+- E2E 全鏈路整合測試: 15 個測試案例 (19 tests, 100% 通過)
+- 測試案例對齊 test_cases.md 規格 (`1966ef2`)
+- 移除 docs/ 目錄的 git 追蹤（檔案保留在地端）
+
 ### v1.3.0 (2026-04-13)
 - 新增可轉債主檔建置流程
-- 更新 ETL 處理邏輯 (`fc4b7b8`)
-- 新增反爬蟲技巧與下載指南文檔 (`b9896ff`)
-- 調整爬蟲輸出路徑與時間函式 (`51f459d`)
-- 更新 Makefile 路徑與 init.sql schema (`01e929f`)
-- 忽略 docs 目錄下的 CSV 數據檔案 (`bb06b28`)
-
-### v1.2.x (2026-01 ~ 2026-04)
-- 各階段開發紀錄見 `docs/agent_context/` 目錄
-- 包含 Phase 1.1 至 Phase 1.4 各子階段文件
+- 更新 ETL 處理邏輯
+- 新增反爬蟲技巧與下載指南文檔
+- 調整爬蟲輸出路徑與時間函式
 
 ## 快速開始
 
@@ -128,10 +131,8 @@ sequenceDiagram
 ### 貢獻指南
 請參閱 `CONTRIBUTING.md`（待建立）。歡迎提交 Pull Request 或 Issue。
 
-### 文件目錄
+### 文件目錄（地端留存，未納入 git 追蹤）
 - `docs/agent_context/` - 各階段開發紀錄與上下文
-- `docs/agent_framework/` - Agent 架構規劃文件
-- `docs/daily_report/` - 團隊工作日誌
 - `docs/crawler_architecture/` - 爬蟲架構分析
 
 ### 聯絡
@@ -140,4 +141,4 @@ sequenceDiagram
 
 ---
 
-*本文件最後更新於 2026-04-14*
+*本文件最後更新於 2026-04-27*
