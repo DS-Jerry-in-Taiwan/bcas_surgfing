@@ -226,11 +226,12 @@ class TpexCbDailySpider(BaseSpider):
                         if f not in mapped or not mapped[f]:
                             mapped[f] = default_val
                     
-                    if not mapped.get("cb_code"):
+                    cb_code_val = mapped.get("cb_code", "")
+                    if not cb_code_val or cb_code_val in ("合計", "GLOSS"):
                         continue
                     
                     item = TpexCbDailyItem(
-                        cb_code=mapped["cb_code"],
+                        cb_code=cb_code_val,
                         cb_name=mapped.get("cb_name", ""),
                         underlying_stock=mapped.get("underlying_stock", ""),
                         trade_date=target_date,

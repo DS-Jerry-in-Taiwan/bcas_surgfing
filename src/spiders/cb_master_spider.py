@@ -275,12 +275,12 @@ class CbMasterSpider(BaseSpider):
                 if f not in mapped or not mapped[f]:
                     mapped[f] = default_val
             
-            for req in cfg.required_fields:
-                if not mapped.get(req):
-                    return None
+            cb_code_val = mapped.get("cb_code", "")
+            if not cb_code_val or cb_code_val in ("合計", "GLOSS"):
+                return None
             
             return CbMasterItem(
-                cb_code=mapped.get("cb_code", ""),
+                cb_code=cb_code_val,
                 cb_name=mapped.get("cb_name", ""),
                 underlying_stock=mapped.get("underlying_stock", ""),
                 issue_date=mapped.get("issue_date", ""),

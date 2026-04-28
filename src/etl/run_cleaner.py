@@ -30,12 +30,12 @@ class DataCleaner:
     # ─── stock_daily vs stock_master ────────────────────────────
 
     def validate_stock_daily(self) -> dict:
-        """驗證 stock_daily 所有 symbol 是否存在於 stock_master"""
+        """驗證 stock_daily + 合併 stock_master 名稱與產業"""
         self.cur.execute("SELECT COUNT(*) FROM stock_daily")
         total = self.cur.fetchone()[0]
 
         self.cur.execute("""
-            SELECT symbol, date
+            SELECT d.symbol, d.date
             FROM stock_daily d
             WHERE NOT EXISTS (
                 SELECT 1 FROM stock_master m WHERE m.symbol = d.symbol
@@ -52,6 +52,15 @@ class DataCleaner:
                 THEN 'OK' ELSE 'NOT_FOUND'
             END
         """)
+
+        self.cur.execute("""
+            UPDATE stock_daily d
+            SET name = m.name,
+                industry = m.industry
+            FROM stock_master m
+            WHERE d.symbol = m.symbol
+              AND d.master_check = 'OK'
+        """)
         self.conn.commit()
 
         return {
@@ -65,7 +74,7 @@ class DataCleaner:
     # ─── tpex_cb_daily vs cb_master ─────────────────────────────
 
     def validate_cb_daily(self) -> dict:
-        """驗證 tpex_cb_daily 所有 cb_code 是否存在於 cb_master"""
+        """驗證 tpex_cb_daily + 合併 cb_master 名稱與轉換價格"""
         self.cur.execute("SELECT COUNT(*) FROM tpex_cb_daily")
         total = self.cur.fetchone()[0]
 
@@ -88,6 +97,15 @@ class DataCleaner:
                 WHEN EXISTS (SELECT 1 FROM cb_master m WHERE m.cb_code = d.cb_code)
                 THEN 'OK' ELSE 'NOT_FOUND'
             END
+        """)
+
+        self.cur.execute("""
+            UPDATE tpex_cb_daily d
+            SET cb_name_enriched = m.cb_name,
+                conversion_price_enriched = m.conversion_price
+            FROM cb_master m
+            WHERE d.cb_code = m.cb_code
+              AND d.master_check = 'OK'
         """)
         self.conn.commit()
 
