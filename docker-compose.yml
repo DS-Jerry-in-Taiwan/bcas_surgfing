@@ -1,8 +1,7 @@
-version: "3.8"
 services:
-  timescaledb:
+  postgres:
     image: timescale/timescaledb:2.13.0-pg14
-    container_name: timescaledb
+    container_name: bcas_db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres

@@ -9,7 +9,7 @@ VENV=".venv/bin/python3"
 
 echo "=== BCAS 每日流程 ==="
 echo "Step 0: 啟動 PostgreSQL"
-docker compose up -d timescaledb
+docker compose up -d postgres
 sleep 2
 
 echo ""
