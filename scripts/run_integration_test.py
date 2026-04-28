@@ -54,18 +54,17 @@ def step_spiders():
     print(f'  ✅ StockMaster: {results["stock_master"]} 筆')
     time.sleep(1)
 
-    for date in ['20260428', '20260415', '20260401', '20260331', '20260301',
-                  '20260205', '20260120', '20260115']:
+    cb_total = 0
+    for date in ['20260115', '20260205', '20260305', '20260401', '20260428']:
         p = PostgresPipeline(table_name='cb_master', batch_size=500, **DB)
         s = CbMasterSpider(pipeline=p)
         r = s.fetch_cb_master(date)
         s.close()
         cnt = r.data.get('count', 0) if r.data else 0
-        if cnt > 0:
-            results['cb_master'] = cnt
-            print(f'  ✅ CbMaster ({date}): {cnt} 筆')
-            break
+        cb_total += cnt
+        print(f'  ✅ CbMaster ({date}): {cnt} 筆')
         time.sleep(0.5)
+    results['cb_master'] = cb_total
 
     p = PostgresPipeline(table_name='stock_daily', batch_size=500, **DB)
     s = StockDailySpider(pipeline=p)
