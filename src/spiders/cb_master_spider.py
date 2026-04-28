@@ -189,18 +189,21 @@ class CbMasterSpider(BaseSpider):
             
             header_cols = []
             data_lines = []
+            header_found = False
             
             for line in raw_lines:
                 if any(line.startswith(p) for p in cfg.skip_prefixes):
                     continue
                 
                 matched_prefix = None
-                for prefix in cfg.header_prefixes:
-                    if line.startswith(prefix):
-                        csv_header = line[len(prefix):]
-                        header_cols = [h.strip(cfg.quote_char).strip() for h in next(csv_lib.reader([csv_header]))]
-                        matched_prefix = prefix
-                        break
+                if not header_found:
+                    for prefix in cfg.header_prefixes:
+                        if line.startswith(prefix):
+                            csv_header = line[len(prefix):]
+                            header_cols = [h.strip(cfg.quote_char).strip() for h in next(csv_lib.reader([csv_header]))]
+                            header_found = True
+                            matched_prefix = prefix
+                            break
                 if matched_prefix:
                     continue
                 

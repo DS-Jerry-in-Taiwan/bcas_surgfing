@@ -58,9 +58,12 @@ class BaseItem(ABC):
         Returns:
             包含所有非私有字段的字典
         """
+        skip = {"metadata", "created_at", "updated_at"}
         result = {}
         for key, value in self.__dict__.items():
             if key.startswith("_"):
+                continue
+            if key in skip:
                 continue
             if value is None:
                 continue
