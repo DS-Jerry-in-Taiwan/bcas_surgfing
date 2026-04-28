@@ -90,8 +90,14 @@ sequenceDiagram
 - 核心 Feapder 框架整合 (Phase 1): BaseSpider、Pipeline、Item 模型
 - Master 資料爬蟲遷移 (Phase 2): StockMasterSpider、CbMasterSpider
 - Daily 資料爬蟲遷移 (Phase 3): StockDailySpider、TpexCbDailySpider
-- E2E 全鏈路整合測試: 15 個測試案例 (19 tests, 100% 通過)
+- E2E 全鏈路整合測試: 15 個測試案例 (33 tests, 100% 通過)
 - 測試案例對齊 test_cases.md 規格 (`1966ef2`)
+- 修復 TWSE 主檔 parser table 定位錯誤
+- 修復 TWSE 日行情 Brotli 壓縮解析問題
+- 修復 TPEx CB 主檔 CSV parser 格式不符（重構為 config-driven）
+- 修復 TPEx CB 日行情 API 端點失效
+- 新增真實 HTTP + PostgreSQL 整合測試
+- 新增 CSV 格式外部化管理（src/configs/csv_templates.py）
 - 移除 docs/ 目錄的 git 追蹤（檔案保留在地端）
 
 ### v1.3.0 (2026-04-13)
