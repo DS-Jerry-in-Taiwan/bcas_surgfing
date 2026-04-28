@@ -34,7 +34,7 @@ from spiders.tpex_cb_daily_spider import TpexCbDailySpider
 # Mock 資料
 TWSE_MASTER_HTML = """
 <table>
-<tr><th>有價證券代號及名稱</th><th>ISIN</th></tr>
+<tr><td>有價證券代號及名稱</td><td>ISIN</td></tr>
 <tr><td>2330　台積電</td><td>TW0002330008</td></tr>
 <tr><td>2317　鴻海</td><td>TW0002317005</td></tr>
 </table>
@@ -49,14 +49,14 @@ TWSE_DAILY_JSON = {
     ]
 }
 
-TPEX_CB_MASTER_CSV = b"""CB Code,CB Name,Stock Code
-35031A,TestCB,2330
-35032B,TestCB2,2317
-"""
+TPEX_CB_MASTER_CSV = """HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,"35031A","TestCB","2025/01/01","2028/12/31","100.0000"
+BODY,"35032B","TestCB2","2025/06/01","2029/05/31","200.0000"
+""".encode("big5")
 
-TPEX_CB_DAILY_CSV = """代號,名稱,標的股票,收盤價,成交量,週轉率(%),溢價率(%),轉換價格,餘額(千)
-35031A,TestCB,2330,105.5,1000,0.5,15.2,80.0,50000
-""".encode("utf-8")
+TPEX_CB_DAILY_CSV = """HEADER,代號,名稱,收市,單位
+BODY,"35031A","TestCB","105.5","1000"
+""".encode("big5")
 
 
 class TestFullPipelineFlow:
@@ -162,6 +162,89 @@ class TestFullPipelineFlow:
         pipeline.close()
         
         assert pipeline.success_count == 2
+
+    def test_full_fetch_master_then_daily(self):
+        """完整調用測試: mock HTTP → fetch_twse → fetch_daily → pipeline 驗證"""
+        pipeline = MemoryPipeline()
+        master_spider = StockMasterSpider(pipeline=pipeline)
+        master_mock = Mock(status_code=200)
+        master_mock.text = TWSE_MASTER_HTML
+
+        with patch('requests.get', return_value=master_mock):
+            result = master_spider.fetch_twse()
+            assert result.success is True
+
+        symbols = [item.symbol for item in pipeline.get_items()]
+        assert "2330" in symbols
+        assert len(symbols) == 2
+
+        daily_spider = StockDailySpider(pipeline=pipeline)
+        daily_mock = Mock(status_code=200)
+        daily_mock.json.return_value = TWSE_DAILY_JSON
+        daily_mock.raise_for_status = Mock()
+
+        with patch('requests.get', return_value=daily_mock):
+            for symbol in symbols:
+                result = daily_spider.fetch_daily(symbol, 2024, 1)
+                assert result.success is True
+
+        all_items = pipeline.get_items()
+        master_items = [i for i in all_items if hasattr(i, 'market_type')]
+        daily_items = [i for i in all_items if hasattr(i, 'date')]
+        assert len(master_items) == 2
+        assert len(daily_items) == 4
+
+    def test_full_fetch_cb_master_then_daily(self):
+        """完整調用測試: mock HTTP → fetch_cb_master → fetch_daily → pipeline 驗證"""
+        pipeline = MemoryPipeline()
+        master_spider = CbMasterSpider(pipeline=pipeline)
+        master_mock = Mock(status_code=200)
+        master_mock.content = TPEX_CB_MASTER_CSV
+
+        with patch('requests.get', return_value=master_mock):
+            result = master_spider.fetch_cb_master("20240115")
+            assert result.success is True
+
+        assert len(pipeline.get_items()) == 2
+
+        daily_spider = TpexCbDailySpider(pipeline=pipeline)
+        daily_mock = Mock(status_code=200)
+        daily_mock.content = TPEX_CB_DAILY_CSV
+        daily_mock.raise_for_status = Mock()
+
+        with patch('requests.get', return_value=daily_mock):
+            result = daily_spider.fetch_daily("2024-01-15")
+            assert result.success is True
+
+        all_items = pipeline.get_items()
+        assert len(all_items) == 3
+
+    def test_full_fetch_tpex_master(self):
+        """完整調用測試: mock HTTP → fetch_tpex → pipeline 驗證"""
+        pipeline = MemoryPipeline()
+        spider = StockMasterSpider(pipeline=pipeline)
+        tpex_mock = Mock(status_code=200)
+        tpex_mock.text = "<table><tr><th>有價證券代號及名稱</th></tr><tr><td>1234　測試股</td></tr></table>"
+        tpex_mock.encoding = "utf-8"
+
+        with patch('requests.get', return_value=tpex_mock):
+            result = spider.fetch_tpex()
+            assert result.success is True
+
+        assert len(pipeline.get_items()) >= 1
+
+    def test_full_fetch_stock_daily_empty_response(self):
+        """完整調用測試: API 回傳空資料 → spider 正確處理"""
+        pipeline = MemoryPipeline()
+        spider = StockDailySpider(pipeline=pipeline)
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = {"stat": "OK", "fields": [], "data": []}
+        mock_resp.raise_for_status = Mock()
+
+        with patch('requests.get', return_value=mock_resp):
+            result = spider.fetch_daily("2330", 2024, 1)
+            assert result.success is True
+            assert result.data["count"] == 0
 
 
 class TestDeduplicationLogic:
@@ -293,6 +376,23 @@ class TestDeduplicationLogic:
 
         assert after >= before
 
+    def test_full_fetch_duplicate_detection(self):
+        """完整調用測試: 兩次 fetch 相同資料，驗證 pipeline 接收多筆"""
+        pipeline = MemoryPipeline()
+        spider = StockDailySpider(pipeline=pipeline)
+
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = TWSE_DAILY_JSON
+        mock_resp.raise_for_status = Mock()
+
+        with patch('requests.get', return_value=mock_resp):
+            r1 = spider.fetch_daily("2330", 2024, 1)
+            assert r1.success is True
+            r2 = spider.fetch_daily("2330", 2024, 1)
+            assert r2.success is True
+
+        assert len(pipeline.get_items()) == 4
+
 
 class TestErrorRecovery:
     """錯誤恢復測試"""
@@ -337,6 +437,25 @@ class TestErrorRecovery:
 
         items = spider.parse_twse_json({"stat": "OK", "fields": [], "data": [["", "", ""]]}, "2330")
         assert len(items) == 0
+
+    def test_full_fetch_network_timeout(self):
+        """完整調用測試: requests.get 拋 timeout → spider 正確處理"""
+        spider = StockDailySpider(pipeline=MemoryPipeline())
+
+        with patch('requests.get', side_effect=requests.exceptions.Timeout("timeout")):
+            result = spider.fetch_daily("2330", 2024, 1)
+            assert result.success is False
+
+    def test_full_fetch_api_error(self):
+        """完整調用測試: API 回傳錯誤 stat → spider 正確回報失敗"""
+        spider = StockDailySpider(pipeline=MemoryPipeline())
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = {"stat": "ERROR", "message": "rate limit"}
+        mock_resp.raise_for_status = Mock()
+
+        with patch('requests.get', return_value=mock_resp):
+            result = spider.fetch_daily("2330", 2024, 1)
+            assert result.success is False
 
 
 class TestMultiTableIntegration:
@@ -429,6 +548,32 @@ class TestMultiTableIntegration:
 
         pipeline.clear()
         assert len(pipeline.get_items()) == 0
+
+    def test_pipeline_batch_auto_flush(self):
+        """測試 CsvPipeline 自動批次 flush"""
+        import os
+        test_dir = tempfile.mkdtemp()
+        try:
+            pipeline = CsvPipeline(output_dir=test_dir, batch_size=2)
+
+            for i in range(3):
+                item = StockDailyItem(
+                    symbol=f"233{i}", date="2024-01-15",
+                    open_price=100.0, high_price=105.0,
+                    low_price=99.0, close_price=103.0, volume=1000000
+                )
+                pipeline.save_items(item)
+
+            csv_path = os.path.join(test_dir, "stock_daily.csv")
+            assert os.path.exists(csv_path)
+
+            with open(csv_path) as f:
+                lines = f.readlines()
+            assert len(lines) == 3
+
+            pipeline.close()
+        finally:
+            shutil.rmtree(test_dir, ignore_errors=True)
 
 
 class TestItemValidation:

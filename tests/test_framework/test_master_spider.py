@@ -163,6 +163,7 @@ class TestStockMasterSpiderFetch:
         </table>
         """
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = html
         mock_get.return_value = mock_response
         
@@ -192,6 +193,7 @@ class TestStockMasterSpiderFetch:
         </table>
         """
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.text = html
         mock_get.return_value = mock_response
         
@@ -321,63 +323,60 @@ class TestCbMasterSpiderParse:
         self.spider = CbMasterSpider()
     
     def test_parse_cb_csv_basic(self):
-        """測試 CB CSV 解析 - 基本"""
-        csv_content = b"""CB Code,CB Name,Stock Code
-35031A,TestCB1,2330
-35032A,TestCB2,2317
-"""
+        """測試 CB CSV 解析 - 基本（HEADER/BODY 格式）"""
+        csv_content = """TITLE,CB Master Data
+DATADATE,test
+HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,"35031A","TestCB1","2025/01/01","2028/12/31","100.0000"
+BODY,"35032A","TestCB2","2025/06/01","2029/05/31","200.0000"
+""".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "20240115")
         
         assert len(items) == 2
         assert items[0].cb_code == "35031A"
         assert items[0].cb_name == "TestCB1"
-        assert items[0].underlying_stock == "2330"
         assert items[0].market_type == "TPEx"
     
     def test_parse_cb_csv_with_gloss_header(self):
-        """測試 CB CSV 解析 - 含 GLOSS 標題行"""
-        csv_content = b"""TITLE,CB Master Data
-DATADATE,20240115
-GLOSS,CB Code,CB Name,Stock Code
-DATA,35031A,TestCB1,2330
-DATA,35032A,TestCB2,2317
-"""
+        """測試 CB CSV 解析 - 含 HEADER 行（TPEx 格式）"""
+        csv_content = """TITLE,test
+DATADATE,test
+HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,"35031A","TestCB1","2025/01/01","2028/12/31","100.0000"
+BODY,"35032A","TestCB2","2025/06/01","2029/05/31","200.0000"
+""".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "20240115")
         
         assert len(items) == 2
         assert items[0].cb_code == "35031A"
         assert items[0].cb_name == "TestCB1"
-        assert items[0].underlying_stock == "2330"
-        assert items[1].cb_code == "35032A"
-        assert items[1].underlying_stock == "2317"
     
     def test_parse_cb_csv_empty(self):
         """測試 CB CSV 解析 - 空內容"""
-        csv_content = b"""TITLE,CB Master Data
-DATADATE,20240115
-GLOSS,CB Code,CB Name,Stock Code
-"""
+        csv_content = """TITLE,test
+DATADATE,test
+HEADER,債券代碼,債券簡稱
+""".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "20240115")
         assert len(items) == 0
     
     def test_parse_cb_csv_no_data(self):
         """測試 CB CSV 解析 - 無資料行"""
-        csv_content = b"""TITLE,CB Master Data
-DATADATE,20240115
-GLOSS,CB Code,CB Name,Stock Code
-THIS_IS_NOT_DATA_LINE
-"""
+        csv_content = """TITLE,test
+DATADATE,test
+HEADER,債券代碼,債券簡稱
+""".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "20240115")
         assert len(items) == 0
     
     def test_row_to_item(self):
-        """測試行轉換為 Item"""
+        """測試行轉換為 Item（使用 column_mapping 中的中文欄位名）"""
         import pandas as pd
         
         row = pd.Series({
-            "CB Code": "35031A",
-            "CB Name": "TestCB",
-            "Stock Code": "2330"
+            "債券代碼": "35031A",
+            "債券簡稱": "TestCB",
+            "轉換起日": "2025/01/01",
         })
         
         item = self.spider._row_to_item(row, "20240115")
@@ -385,16 +384,14 @@ THIS_IS_NOT_DATA_LINE
         assert item is not None
         assert item.cb_code == "35031A"
         assert item.cb_name == "TestCB"
-        assert item.underlying_stock == "2330"
     
     def test_row_to_item_invalid(self):
-        """測試行轉換為 Item - 無效行"""
+        """測試行轉換為 Item - 無效行（無 cb_code）"""
         import pandas as pd
         
         row = pd.Series({
-            "CB Code": "",
-            "CB Name": "Test",
-            "Stock Code": "2330"
+            "債券代碼": "",
+            "債券簡稱": "Test",
         })
         
         item = self.spider._row_to_item(row, "20240115")
@@ -412,10 +409,11 @@ class TestCbMasterSpiderFetch:
     @patch('spiders.cb_master_spider.requests.get')
     def test_fetch_cb_master_success(self, mock_get):
         """測試 CB Master 抓取成功"""
-        csv_content = b"""TITLE,CB Master
-CB Code,CB Name,Stock Code
-35031A,TestCB,2330
-"""
+        csv_content = """TITLE,test
+DATADATE,test
+HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,"35031A","TestCB","2025/01/01","2028/12/31","100.0000"
+""".encode("big5")
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.content = csv_content

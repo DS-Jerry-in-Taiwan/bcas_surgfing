@@ -23,6 +23,7 @@ import requests
 from src.framework.base_spider import BaseSpider, SpiderResponse
 from src.framework.base_item import CbMasterItem
 from src.framework.pipelines import PostgresPipeline, CsvPipeline
+from src.configs.csv_templates import CB_MASTER_TPEX
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,15 @@ class CbMasterSpider(BaseSpider):
     
     Attributes:
         BASE_URL: TPEx CB CSV 基本 URL
+        CSV_CONFIG: CSV 格式設定（可抽換以因應格式變更）
         pipeline: 資料寫入管道
         items: 已抓取的 CB 列表
         days_back: 回查天數
     """
     
     BASE_URL = "https://www.tpex.org.tw/storage/bond_zone/tradeinfo/cb"
+    
+    CSV_CONFIG = CB_MASTER_TPEX
     
     def __init__(
         self,
@@ -175,49 +179,65 @@ class CbMasterSpider(BaseSpider):
             CbMasterItem 列表
         """
         items = []
+        cfg = self.CSV_CONFIG
         
         try:
+            import csv as csv_lib
             raw_lines = BytesIO(content).read().decode(
-                "big5", errors="ignore"
+                cfg.encoding, errors="ignore"
             ).splitlines()
             
             header_cols = []
             data_lines = []
             
             for line in raw_lines:
-                if line.startswith("GLOSS,"):
-                    header_cols = line[6:].split(",")
-                elif line.startswith("TITLE") or line.startswith("DATADATE"):
+                if any(line.startswith(p) for p in cfg.skip_prefixes):
                     continue
-                elif line.startswith("DATA,"):
-                    data_lines.append(line[5:])
-                elif line.strip() == "":
+                
+                matched_prefix = None
+                for prefix in cfg.header_prefixes:
+                    if line.startswith(prefix):
+                        csv_header = line[len(prefix):]
+                        header_cols = [h.strip(cfg.quote_char).strip() for h in next(csv_lib.reader([csv_header]))]
+                        matched_prefix = prefix
+                        break
+                if matched_prefix:
                     continue
-                elif "," in line and not line.startswith("DATA"):
+                
+                matched_prefix = None
+                for prefix in cfg.body_prefixes:
+                    if line.startswith(prefix):
+                        body = line[len(prefix):]
+                        data_lines.append(body)
+                        matched_prefix = prefix
+                        break
+                if matched_prefix:
+                    continue
+                
+                if line.strip() == "":
+                    continue
+                if cfg.delimiter in line:
                     data_lines.append(line)
             
             if not data_lines:
                 logger.warning(f"CB Master: No data lines for {target_date}")
                 return items
             
-            clean_csv = StringIO("\n".join(data_lines))
+            reader = csv_lib.reader(data_lines)
+            rows = [r for r in reader]
+            import pandas as pd
+            df = pd.DataFrame(rows)
             
-            try:
-                if header_cols:
-                    df = pd.read_csv(clean_csv, header=None, names=header_cols)
-                else:
-                    df = pd.read_csv(clean_csv)
-            except Exception as e:
-                logger.error(f"CSV parse error: {e}")
-                return items
+            if header_cols and len(header_cols) == df.shape[1]:
+                df.columns = header_cols
+            else:
+                logger.warning(f"CB Master: header/data column mismatch ({len(header_cols)} vs {df.shape[1]}), using default names")
             
             for _, row in df.iterrows():
                 try:
                     item = self._row_to_item(row, target_date)
-                    
-                    if item and item.validate():
+                    if item is not None:
                         items.append(item)
-                        
                 except Exception as e:
                     logger.debug(f"CB row parse error: {e}")
                     continue
@@ -231,7 +251,7 @@ class CbMasterSpider(BaseSpider):
     
     def _row_to_item(self, row: pd.Series, target_date: str = None) -> Optional[CbMasterItem]:
         """
-        將 CSV 行轉換為 Item
+        將 CSV 行轉換為 Item（依 CSV_CONFIG 的 column_mapping）
         
         Args:
             row: pandas Series
@@ -240,21 +260,32 @@ class CbMasterSpider(BaseSpider):
         Returns:
             CbMasterItem 或 None
         """
+        cfg = self.CSV_CONFIG
+        
         try:
-            cb_code = str(row.get("CB Code", "")).strip()
-            cb_name = str(row.get("CB Name", "")).strip()
-            underlying_stock = str(row.get("Stock Code", "")).strip()
+            mapped = {}
+            for csv_col, field_name in cfg.column_mapping.items():
+                val = str(row.get(csv_col, "")).strip().strip(cfg.quote_char)
+                mapped[field_name] = val if val and val != "nan" else ""
             
-            if not cb_code or cb_code == "nan":
-                return None
+            for f, default_val in cfg.defaults.items():
+                if f not in mapped or not mapped[f]:
+                    mapped[f] = default_val
+            
+            for req in cfg.required_fields:
+                if not mapped.get(req):
+                    return None
             
             return CbMasterItem(
-                cb_code=cb_code,
-                cb_name=cb_name if cb_name != "nan" else "",
-                underlying_stock=underlying_stock if underlying_stock != "nan" else "",
-                market_type="TPEx",
+                cb_code=mapped.get("cb_code", ""),
+                cb_name=mapped.get("cb_name", ""),
+                underlying_stock=mapped.get("underlying_stock", ""),
+                issue_date=mapped.get("issue_date", ""),
+                maturity_date=mapped.get("maturity_date", ""),
+                conversion_price=mapped.get("conversion_price", ""),
+                market_type=mapped.get("market_type", "TPEx"),
                 source_url=self.BASE_URL,
-                source_type="tpex_cb"
+                source_type=mapped.get("source_type", "tpex_cb"),
             )
             
         except Exception as e:

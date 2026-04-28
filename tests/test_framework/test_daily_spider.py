@@ -238,10 +238,6 @@ class TestTpexCbDailyParse:
         """測試前準備"""
         self.spider = TpexCbDailySpider()
     
-    def test_convert_date_format(self):
-        """測試日期格式轉換"""
-        assert self.spider._convert_date_format("2024-01-15") == "2024/01/15"
-    
     def test_parse_number(self):
         """測試數值解析"""
         assert self.spider._parse_number(123.45) == 123.45
@@ -249,18 +245,16 @@ class TestTpexCbDailyParse:
         assert self.spider._parse_number(None) == 0.0
     
     def test_parse_cb_csv_basic(self):
-        """測試 CB CSV 解析 - 基本"""
-        csv_text = """代號,名稱,標的股票,收盤價,成交量,週轉率(%),溢價率(%),轉換價格,餘額(千)
-35031A,TestCB1,2330,105.5,1000,0.5,15.2,80.0,50000
-35032B,TestCB2,2317,98.3,500,0.2,8.5,65.0,30000
-"""
-        csv_content = csv_text.encode("utf-8")
+        """測試 CB CSV 解析 - 基本（HEADER/BODY 格式）"""
+        csv_content = """HEADER,代號,名稱,收市,單位
+BODY,"35031A","TestCB1","105.5","1000"
+BODY,"35032B","TestCB2","98.3","500"
+""".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "2024-01-15")
         
         assert len(items) == 2
         assert items[0].cb_code == "35031A"
         assert items[0].cb_name == "TestCB1"
-        assert items[0].underlying_stock == "2330"
         assert items[0].closing_price == 105.5
         assert items[0].volume == 1000.0
         assert items[0].trade_date == "2024-01-15"
@@ -274,8 +268,7 @@ class TestTpexCbDailyParse:
     
     def test_parse_cb_csv_no_data(self):
         """測試 CB CSV 解析 - 無資料"""
-        csv_content = b"""Code,Name,Stock
-"""
+        csv_content = "HEADER,代號,名稱\n".encode("big5")
         items = self.spider.parse_cb_csv(csv_content, "2024-01-15")
         assert len(items) == 0
 
@@ -291,13 +284,12 @@ class TestTpexCbDailyFetch:
     @patch('spiders.tpex_cb_daily_spider.requests.get')
     def test_fetch_daily_success(self, mock_get):
         """測試抓取成功"""
-        csv_text = """代號,名稱,標的股票,收盤價,成交量
-35031A,TestCB,2330,105.5,1000
-"""
-        csv_content = csv_text.encode("utf-8")
+        csv_content = """HEADER,代號,名稱,收市,單位
+BODY,"35031A","TestCB","105.5","1000"
+""".encode("big5")
         mock_response = Mock()
+        mock_response.status_code = 200
         mock_response.content = csv_content
-        mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
         
         response = self.spider.fetch_daily("2024-01-15")

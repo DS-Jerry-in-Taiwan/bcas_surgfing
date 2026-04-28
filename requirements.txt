@@ -4,6 +4,9 @@ beautifulsoup4
 tqdm
 lxml
 
+# Brotli compression (TWSE requires this for JSON responses)
+brotli
+
 # Feapder Framework (optional - install if needed)
 # feapder
 

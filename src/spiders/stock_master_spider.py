@@ -86,6 +86,16 @@ class StockMasterSpider(BaseSpider):
                 headers=self.headers,
                 timeout=30
             )
+            
+            if response.status_code != 200:
+                logger.warning(f"TWSE fetch failed: HTTP {response.status_code}")
+                self.record_request(success=False)
+                return SpiderResponse(
+                    success=False,
+                    error=f"HTTP {response.status_code}",
+                    url=self.TWSE_URL
+                )
+            
             response.encoding = "big5"
             
             items = self.parse_twse_html(response.text)
@@ -128,6 +138,16 @@ class StockMasterSpider(BaseSpider):
                 headers=self.headers,
                 timeout=30
             )
+            
+            if response.status_code != 200:
+                logger.warning(f"TPEx fetch failed: HTTP {response.status_code}")
+                self.record_request(success=False)
+                return SpiderResponse(
+                    success=False,
+                    error=f"HTTP {response.status_code}",
+                    url=self.TPEX_URL
+                )
+            
             response.encoding = "utf-8"
             
             items = self.parse_tpex_html(response.text)
@@ -169,10 +189,20 @@ class StockMasterSpider(BaseSpider):
         
         try:
             soup = BeautifulSoup(html_content, "html.parser")
-            table = soup.find("table")
+            tables = soup.find_all("table")
+            
+            table = None
+            for tbl in tables:
+                header_row = tbl.find("tr")
+                if header_row:
+                    header_cells = header_row.find_all(["th", "td"])
+                    header_text = " ".join(c.get_text(strip=True) for c in header_cells)
+                    if "代號" in header_text and "名稱" in header_text:
+                        table = tbl
+                        break
             
             if not table:
-                logger.warning("TWSE: No table found")
+                logger.warning("TWSE: No table with expected header found")
                 return items
             
             rows = table.find_all("tr")
@@ -181,7 +211,7 @@ class StockMasterSpider(BaseSpider):
                 return items
             
             header = rows[0]
-            header_cols = [th.get_text(strip=True) for th in header.find_all("th")]
+            header_cols = [c.get_text(strip=True) for c in header.find_all(["th", "td"])]
             
             symbol_name_col = None
             for i, col in enumerate(header_cols):

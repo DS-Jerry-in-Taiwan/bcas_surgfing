@@ -24,6 +24,7 @@ import requests
 from src.framework.base_spider import BaseSpider, SpiderResponse
 from src.framework.base_item import TpexCbDailyItem
 from src.framework.pipelines import PostgresPipeline, CsvPipeline
+from src.configs.csv_templates import CB_DAILY_TPEX
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,14 @@ class TpexCbDailySpider(BaseSpider):
     從 TPEx 下載可轉債日行情 CSV
     
     Attributes:
-        BASE_URL: TPEx CB Daily API URL
+        BASE_URL: TPEx CB CSV 儲存路徑
+        CSV_CONFIG: CSV 格式設定（可抽換）
         pipeline: 資料寫入管道
         items: 已抓取的 CB 行情列表
     """
     
-    BASE_URL = "https://www.tpex.org.tw/web/bond/bond_info/cb_daily_result/download.php"
+    BASE_URL = "https://www.tpex.org.tw/storage/bond_zone/tradeinfo/cb"
+    CSV_CONFIG = CB_DAILY_TPEX
     
     def __init__(
         self,
@@ -49,14 +52,6 @@ class TpexCbDailySpider(BaseSpider):
         redis_key: Optional[str] = None,
         **kwargs
     ):
-        """
-        初始化 TpexCbDailySpider
-        
-        Args:
-            pipeline: 資料寫入管道（預設 CsvPipeline）
-            thread_count: 執行緒數
-            redis_key: Redis 鍵
-        """
         super().__init__(
             thread_count=thread_count,
             redis_key=redis_key,
@@ -68,28 +63,21 @@ class TpexCbDailySpider(BaseSpider):
         
         logger.info("TpexCbDailySpider initialized")
     
-    def _convert_date_format(self, date: str) -> str:
+    def _build_url(self, date: str) -> str:
         """
-        轉換日期格式
+        建立 CSV 下載 URL
         
         Args:
-            date: YYYY-MM-DD 格式
+            date: YYYYMMDD 格式
         
         Returns:
-            YYYY/MM/DD 格式
+            完整下載 URL
         """
-        return date.replace("-", "/")
+        year = date[:4]
+        year_month = date[:6]
+        return f"{self.BASE_URL}/{year}/{year_month}/RSta0113.{date}-C.csv"
     
     def _parse_number(self, value) -> float:
-        """
-        解析數值
-        
-        Args:
-            value: 數值
-        
-        Returns:
-            float
-        """
         if pd.isna(value):
             return 0.0
         if isinstance(value, (int, float)):
@@ -110,21 +98,26 @@ class TpexCbDailySpider(BaseSpider):
         Returns:
             SpiderResponse
         """
-        params = {
-            "l": "zh-tw",
-            "d": self._convert_date_format(date)
-        }
+        url_date = date.replace("-", "")
+        url = self._build_url(url_date)
         
         try:
             logger.info(f"Fetching TPEx CB Daily: {date}")
             
             response = requests.get(
-                self.BASE_URL,
-                params=params,
+                url,
                 headers=self.headers,
                 timeout=30
             )
-            response.raise_for_status()
+            
+            if response.status_code != 200:
+                logger.warning(f"TPEx CB Daily download failed: {response.status_code}")
+                self.record_request(success=False)
+                return SpiderResponse(
+                    success=False,
+                    error=f"HTTP {response.status_code}",
+                    url=url
+                )
             
             items = self.parse_cb_csv(response.content, date)
             self.items.extend(items)
@@ -137,7 +130,7 @@ class TpexCbDailySpider(BaseSpider):
             return SpiderResponse(
                 success=True,
                 data={"count": len(items), "date": date},
-                url=self.BASE_URL,
+                url=url,
                 metadata={"date": date}
             )
             
@@ -147,7 +140,7 @@ class TpexCbDailySpider(BaseSpider):
             return SpiderResponse(
                 success=False,
                 error=str(e),
-                url=self.BASE_URL
+                url=url
             )
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
@@ -155,12 +148,12 @@ class TpexCbDailySpider(BaseSpider):
             return SpiderResponse(
                 success=False,
                 error=str(e),
-                url=self.BASE_URL
+                url=url
             )
     
     def parse_cb_csv(self, content: bytes, target_date: str) -> List[TpexCbDailyItem]:
         """
-        解析 TPEx CB CSV
+        解析 TPEx CB CSV（依 CSV_CONFIG）
         
         Args:
             content: CSV 原始內容
@@ -170,52 +163,83 @@ class TpexCbDailySpider(BaseSpider):
             TpexCbDailyItem 列表
         """
         items = []
+        cfg = self.CSV_CONFIG
         
         try:
-            df = pd.read_csv(BytesIO(content), encoding="utf-8", dtype=str)
+            import csv as csv_lib
+            raw_lines = BytesIO(content).read().decode(
+                cfg.encoding, errors="ignore"
+            ).splitlines()
             
-            df = df.fillna("")
+            header_cols = []
+            data_lines = []
             
-            column_map = {}
-            for col in df.columns:
-                col_lower = col.lower()
-                if "代號" in col and "股票" not in col:
-                    column_map["code"] = col
-                elif "名稱" in col:
-                    column_map["name"] = col
-                elif "標的股票" in col:
-                    column_map["stock"] = col
-                elif "週轉率" in col:
-                    column_map["turnover"] = col
-                elif "溢價率" in col:
-                    column_map["premium"] = col
-                elif "轉換價格" in col:
-                    column_map["conversion"] = col
-                elif "餘額" in col:
-                    column_map["balance"] = col
-                elif "收盤價" in col:
-                    column_map["price"] = col
-                elif "成交量" in col:
-                    column_map["volume"] = col
+            for line in raw_lines:
+                if any(line.startswith(p) for p in cfg.skip_prefixes):
+                    continue
+                
+                matched = False
+                for prefix in cfg.header_prefixes:
+                    if line.startswith(prefix):
+                        h = line[len(prefix):]
+                        header_cols = [c.strip(cfg.quote_char).strip() for c in next(csv_lib.reader([h]))]
+                        matched = True
+                        break
+                if matched:
+                    continue
+                
+                for prefix in cfg.body_prefixes:
+                    if line.startswith(prefix):
+                        data_lines.append(line[len(prefix):])
+                        matched = True
+                        break
+                if matched:
+                    continue
+                
+                if line.strip() == "":
+                    continue
+                if cfg.delimiter in line:
+                    data_lines.append(line)
+            
+            if not data_lines:
+                logger.warning(f"TPEx CB Daily {target_date}: No data lines")
+                return items
+            
+            reader = csv_lib.reader(data_lines)
+            rows = [r for r in reader]
+            import pandas as pd
+            df = pd.DataFrame(rows)
+            
+            if header_cols and len(header_cols) == df.shape[1]:
+                df.columns = header_cols
+            else:
+                logger.warning(f"TPEx CB Daily: header/data column mismatch ({len(header_cols)} vs {df.shape[1]})")
             
             for _, row in df.iterrows():
                 try:
-                    cb_code = str(row.get(column_map.get("code", "代號"), "")).strip()
+                    mapped = {}
+                    for csv_col, field_name in cfg.column_mapping.items():
+                        val = str(row.get(csv_col, "")).strip().strip(cfg.quote_char)
+                        mapped[field_name] = val if val and val != "nan" else ""
                     
-                    if not cb_code or cb_code == "nan":
+                    for f, default_val in cfg.defaults.items():
+                        if f not in mapped or not mapped[f]:
+                            mapped[f] = default_val
+                    
+                    if not mapped.get("cb_code"):
                         continue
                     
                     item = TpexCbDailyItem(
-                        cb_code=cb_code,
-                        cb_name=str(row.get(column_map.get("name", "名稱"), "")).strip(),
-                        underlying_stock=str(row.get(column_map.get("stock", "標的股票"), "")).strip(),
+                        cb_code=mapped["cb_code"],
+                        cb_name=mapped.get("cb_name", ""),
+                        underlying_stock=mapped.get("underlying_stock", ""),
                         trade_date=target_date,
-                        closing_price=self._parse_number(row.get(column_map.get("price", "收盤價"), 0)),
-                        volume=self._parse_number(row.get(column_map.get("volume", "成交量"), 0)),
-                        turnover_rate=self._parse_number(row.get(column_map.get("turnover", "週轉率(%)"), 0)),
-                        premium_rate=self._parse_number(row.get(column_map.get("premium", "溢價率(%)"), 0)),
-                        conversion_price=self._parse_number(row.get(column_map.get("conversion", "轉換價格"), 0)),
-                        remaining_balance=self._parse_number(row.get(column_map.get("balance", "餘額(千)"), 0)),
+                        closing_price=self._parse_number(mapped.get("closing_price", 0)),
+                        volume=self._parse_number(mapped.get("volume", 0)),
+                        turnover_rate=self._parse_number(mapped.get("turnover_rate", 0)),
+                        premium_rate=self._parse_number(mapped.get("premium_rate", 0)),
+                        conversion_price=self._parse_number(mapped.get("conversion_price", 0)),
+                        remaining_balance=self._parse_number(mapped.get("remaining_balance", 0)),
                         source_url=self.BASE_URL,
                         source_type="tpex_cb_daily"
                     )
@@ -227,10 +251,10 @@ class TpexCbDailySpider(BaseSpider):
                     logger.debug(f"CB row parse error: {e}")
                     continue
             
-            logger.info(f"TPEx CB {target_date}: Parsed {len(items)} items")
+            logger.info(f"TPEx CB Daily {target_date}: Parsed {len(items)} items")
             
         except Exception as e:
-            logger.error(f"TPEx CB CSV parse error: {e}")
+            logger.error(f"TPEx CB Daily CSV parse error: {e}")
         
         return items
     
