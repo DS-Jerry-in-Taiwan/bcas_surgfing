@@ -103,7 +103,7 @@ class StockMasterSpider(BaseSpider):
             self.items.extend(items)
             
             for item in items:
-                self.pipeline.save_items(item)
+                self.add_item(item)
             
             self.record_request(success=True)
             
@@ -155,7 +155,7 @@ class StockMasterSpider(BaseSpider):
             self.items.extend(items)
             
             for item in items:
-                self.pipeline.save_items(item)
+                self.add_item(item)
             
             self.record_request(success=True)
             

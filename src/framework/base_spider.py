@@ -107,6 +107,10 @@ class BaseSpider:
         # 統計
         self.request_count: int = 0
         self.error_count: int = 0
+
+        # collect_only mode（延遲寫入，驗證後才 flush）
+        self._pending_items: List = []
+        self.collect_only: bool = False
         
         logger.info(
             f"BaseSpider initialized: thread={thread_count}, "
@@ -274,6 +278,40 @@ class BaseSpider:
         self.request_count += 1
         if not success:
             self.error_count += 1
+
+    # ─── collect_only mode ──────────────────────────────────────────
+    
+    def add_item(self, item) -> None:
+        """統一的 item 儲存入口
+        
+        在 collect_only 模式下暫存不寫入；否則立即寫入 pipeline。
+        
+        Args:
+            item: BaseItem 實例
+        """
+        self._pending_items.append(item)
+        pipeline = getattr(self, 'pipeline', None)
+        if pipeline and not getattr(self, 'collect_only', False):
+            pipeline.save_items(item)
+    
+    def flush_items(self, pipeline=None) -> None:
+        """將暫存的 items 寫入指定的 pipeline
+        
+        Args:
+            pipeline: 目標 pipeline（若為 None 則使用 self.pipeline）
+        """
+        p = pipeline or getattr(self, 'pipeline', None)
+        if not p:
+            return
+        for item in self._pending_items:
+            p.save_items(item)
+        self._pending_items.clear()
+    
+    def get_pending_count(self) -> int:
+        """取得暫存 items 數量"""
+        return len(self._pending_items)
+    
+    # ────────────────────────────────────────────────────────────────
     
     def get_statistics(self) -> Dict[str, Any]:
         """取得爬蟲統計"""
