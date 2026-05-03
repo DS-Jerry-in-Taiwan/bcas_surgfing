@@ -509,41 +509,6 @@ bcas_quant/
 
 ---
 
-## 📈 統計信息
-
-| 項目 | 數值 |
-|------|------|
-| **代碼量** | ~13,600 行 |
-| ├─ Python | ~8,000 行 |
-| ├─ Go | ~400 行 |
-| ├─ SQL | ~500 行 |
-| └─ 文檔 | ~4,700 行 |
-| **單元測試** | 127 個 (92% 覆蓋率) |
-| **E2E 測試** | 13 個真實 API 測試 |
-| **驗證規則** | 24 條 (5 維度) |
-| **爬蟲** | 4 個 |
-| **數據表** | 4 張 |
-| **文檔** | 9 份 |
-| **Docker 映像大小** | 41.7 MB (Scheduler) |
-
----
-
-## 🔗 有用的鏈接
-
-### 內部文檔
-- 📄 [完整系統架構](docs/agent_context/phase2_raw_data_validation/SYSTEM_ARCHITECTURE.md) (970 行)
-- 📄 [架構梳理摘要](SYSTEM_ARCHITECTURE_SUMMARY.md) (320 行)
-- 📄 [驗證層設計](docs/agent_context/phase2_raw_data_validation/DEVELOPMENT_PLAN.md)
-- 📄 [交付摘要](docs/agent_context/phase2_raw_data_validation/DELIVERY_SUMMARY.md)
-
-### 外部資源
-- 🔗 [Feapder 文檔](https://github.com/phpk/feapder)
-- 🔗 [PostgreSQL 14 文檔](https://www.postgresql.org/docs/14/)
-- 🔗 [Go Cron 文檔](https://github.com/robfig/cron)
-- 🔗 [Docker Compose 文檔](https://docs.docker.com/compose/)
-
----
-
 ## 📝 變更歷史
 
 ### v3.0.0 (2026-05-03) ✨ **架構完善 + 排程器完成**
