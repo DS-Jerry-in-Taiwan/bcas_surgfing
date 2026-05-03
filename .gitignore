@@ -56,3 +56,4 @@ logs/
 
 # 開發文檔（不推入 repo）
 docs/
+scheduler/scheduler

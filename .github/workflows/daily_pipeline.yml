@@ -1,0 +1,75 @@
+name: Daily Pipeline
+
+on:
+  schedule:
+    # Weekdays 18:00 Taiwan time (10:00 UTC)
+    - cron: '0 10 * * 1-5'
+  workflow_dispatch:      # Allow manual trigger
+
+jobs:
+  validate:
+    name: Validate Data
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cbas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/test_framework/ -q --tb=short
+
+      - name: Run validation (validate-only mode)
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
+          POSTGRES_DB: cbas
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        run: |
+          python src/run_daily.py --validate-only
+
+      - name: Upload validation reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-reports
+          path: logs/validation/
+          retention-days: 30
+
+  notify:
+    name: Notify on failure
+    needs: validate
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check failure
+        run: |
+          echo "❌ Pipeline failed on $(date)"
+          echo "Check workflow: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
