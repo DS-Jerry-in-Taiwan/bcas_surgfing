@@ -422,5 +422,96 @@ class TestE2ERealValidateOnly:
             spider.close()
 
 
+# ─── Broker Breakdown Tests ──────────────────────────────────────────
+
+class TestE2ERealBrokerBreakdown:
+    """Real BSR fetch data validation"""
+
+    def test_fetch_bsr_data(self):
+        from spiders.broker_breakdown_spider import BrokerBreakdownSpider
+        spider = BrokerBreakdownSpider()
+        try:
+            result = spider.fetch_broker_breakdown("20260514", "2330")
+            assert result.success, f"BSR fetch failed: {result.error}"
+            items = spider.get_items()
+            assert len(items) > 0
+            item = items[0]
+            assert item.symbol == "2330"
+            assert item.source_type == "bsr"
+            assert item.broker_id
+            assert item.broker_name
+        finally:
+            spider.close()
+
+    def test_bsr_in_step_validate(self):
+        from run_daily import step_validate
+        from spiders.broker_breakdown_spider import BrokerBreakdownSpider
+
+        spider = BrokerBreakdownSpider()
+        try:
+            result = spider.fetch_broker_breakdown("20260514", "2330")
+            if not result.success:
+                pytest.skip(f"BSR unavailable: {result.error}")
+
+            records = [item.to_dict() for item in spider.get_items()]
+
+            spider_result = {
+                "broker_breakdown": {"success": True, "count": len(records)},
+                "stock_master": {"success": True, "count": 1},
+            }
+            collected = {
+                "broker_breakdown": records,
+                "stock_master": [{"symbol": "2330", "name": "TSMC", "market_type": "TWSE", "industry": "半導體"}],
+            }
+
+            v_result = step_validate(spider_result, collected)
+            assert "broker_breakdown" in v_result["reports"]
+            bb_report = v_result["reports"]["broker_breakdown"]
+            # 不拋錯即可
+            assert not v_result.get("error")
+        finally:
+            spider.close()
+
+
+class TestE2EAllTablesWithBrokerBreakdown:
+    """All 5 tables including broker_breakdown validated together"""
+
+    def test_all_5_tables_pass(self):
+        from run_daily import step_validate
+        from spiders.broker_breakdown_spider import BrokerBreakdownSpider
+
+        spider = BrokerBreakdownSpider()
+        try:
+            result = spider.fetch_broker_breakdown("20260514", "2330")
+            if not result.success:
+                pytest.skip(f"BSR unavailable: {result.error}")
+            bb_records = [item.to_dict() for item in spider.get_items()]
+        finally:
+            spider.close()
+
+        spider_results = {
+            "stock_master": {"success": True, "count": 1},
+            "stock_daily": {"success": True, "count": 1},
+            "cb_master": {"success": True, "count": 1},
+            "tpex_cb_daily": {"success": True, "count": 1},
+            "broker_breakdown": {"success": True, "count": len(bb_records)},
+        }
+        collected = {
+            "stock_master": [{"symbol": "2330", "name": "TSMC", "market_type": "TWSE", "industry": "半導體"}],
+            "stock_daily": [{"symbol": "2330", "date": "2026-05-14", "close_price": 100.0, "volume": 1000}],
+            "cb_master": [{"cb_code": "23301", "cb_name": "台積電一", "conversion_price": 100.0, "market_type": "TPEx"}],
+            "tpex_cb_daily": [{"cb_code": "23301", "trade_date": "2026-05-14", "closing_price": 105.0, "volume": 100}],
+            "broker_breakdown": bb_records,
+        }
+
+        v_result = step_validate(spider_results, collected)
+        assert "broker_breakdown" in v_result["reports"]
+        assert "stock_master" in v_result["reports"]
+        assert "stock_daily" in v_result["reports"]
+        assert "cb_master" in v_result["reports"]
+        assert "tpex_cb_daily" in v_result["reports"]
+        assert not v_result.get("error")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
