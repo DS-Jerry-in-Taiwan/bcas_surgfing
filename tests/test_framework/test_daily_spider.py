@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 from io import BytesIO
 
+import requests
 import sys
 sys.path.insert(0, "src")
 
@@ -157,12 +158,13 @@ class TestStockDailyFetch:
     
     @patch('spiders.stock_daily_spider.requests.get')
     def test_fetch_daily_network_error(self, mock_get):
-        """測試網路錯誤"""
-        mock_get.side_effect = Exception("Connection timeout")
-        
+        """測試網路錯誤（retry all fail）"""
+        mock_get.side_effect = requests.RequestException("Connection timeout")
+
         response = self.spider.fetch_daily("2330", 2024, 1)
-        
+
         assert response.success is False
+        assert mock_get.call_count == 3
     
     def test_generate_months_in_range(self):
         """測試月份生成"""
@@ -455,6 +457,71 @@ class TestDateUtilities:
         
         item_empty = TpexCbDailyItem(cb_code="", trade_date="")
         assert item_empty.validate() is False
+
+
+class TestStockDailySpiderRetry:
+    """StockDailySpider fetch_daily 重試邏輯測試"""
+
+    @patch("spiders.stock_daily_spider.requests.get")
+    def test_retry_then_success(self, mock_get):
+        """前 2 次失敗，第 3 次成功"""
+        from spiders.stock_daily_spider import StockDailySpider
+
+        # 第 1、2 次拋異常，第 3 次成功
+        success_resp = MagicMock()
+        success_resp.status_code = 200
+        success_resp.json.return_value = {
+            "stat": "OK",
+            "data": [
+                ["115/04/01", "1000", "1000000", "100", "101", "99", "100.5", "+1.5", "500", ""]
+            ],
+        }
+
+        mock_get.side_effect = [
+            requests.RequestException("rate limited"),  # 1st fail
+            requests.RequestException("rate limited"),  # 2nd fail
+            success_resp,                                # 3rd success
+        ]
+
+        spider = StockDailySpider()
+        result = spider.fetch_daily("2330", 2026, 4)
+        assert result.success, f"Should succeed after retry: {result.error}"
+        assert mock_get.call_count == 3
+        spider.close()
+
+    @patch("spiders.stock_daily_spider.requests.get")
+    def test_retry_all_fail(self, mock_get):
+        """全部 3 次重試都失敗"""
+        from spiders.stock_daily_spider import StockDailySpider
+
+        mock_get.side_effect = requests.RequestException("always down")
+
+        spider = StockDailySpider()
+        result = spider.fetch_daily("2330", 2026, 4)
+        assert not result.success
+        assert mock_get.call_count == 3
+        spider.close()
+
+    @patch("spiders.stock_daily_spider.requests.get")
+    def test_retry_success_first_try(self, mock_get):
+        """第一次就成功，不觸發重試"""
+        from spiders.stock_daily_spider import StockDailySpider
+
+        success_resp = MagicMock()
+        success_resp.status_code = 200
+        success_resp.json.return_value = {
+            "stat": "OK",
+            "data": [
+                ["115/04/01", "1000", "1000000", "100", "101", "99", "100.5", "+1.5", "500", ""]
+            ],
+        }
+        mock_get.return_value = success_resp
+
+        spider = StockDailySpider()
+        result = spider.fetch_daily("2330", 2026, 4)
+        assert result.success
+        assert mock_get.call_count == 1
+        spider.close()
 
 
 class TestSpiderClose:

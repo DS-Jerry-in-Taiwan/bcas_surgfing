@@ -14,6 +14,7 @@ StockDailySpider - TWSE 個股日行情爬蟲
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime, timedelta
 
@@ -103,76 +104,82 @@ class StockDailySpider(BaseSpider):
     
     def fetch_daily(self, symbol: str, year: int, month: int) -> SpiderResponse:
         """
-        抓取單一股票單月資料
-        
+        抓取單一股票單月資料（含自動重試）
+
         Args:
             symbol: 股票代號（如 "2330"）
             year: 年份（如 2024）
             month: 月份（1-12）
-        
+
         Returns:
             SpiderResponse
         """
+        max_retries = 3
+        last_error = None
         params = {
             "response": "json",
             "date": f"{year}{month:02d}01",
-            "stockNo": symbol
+            "stockNo": symbol,
         }
-        
-        try:
-            logger.info(f"Fetching TWSE daily: {symbol} {year}/{month:02d}")
-            
-            response = requests.get(
-                self.TWSE_URL,
-                params=params,
-                headers=self.headers,
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            if data.get("stat") != "OK":
-                logger.warning(f"TWSE API error: {data.get('stat')}")
-                self.record_request(success=False)
-                return SpiderResponse(
-                    success=False,
-                    error=f"API error: {data.get('stat')}",
-                    url=self.TWSE_URL,
-                    metadata={"symbol": symbol, "year": year, "month": month}
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"Fetching TWSE daily: {symbol} {year}/{month:02d} (attempt {attempt}/{max_retries})")
+
+                response = requests.get(
+                    self.TWSE_URL,
+                    params=params,
+                    headers=self.headers,
+                    timeout=30,
                 )
-            
-            items = self.parse_twse_json(data, symbol)
-            self.items.extend(items)
-            
-            for item in items:
-                self.add_item(item)
-            
-            self.record_request(success=True)
-            
-            return SpiderResponse(
-                success=True,
-                data={"count": len(items), "symbol": symbol, "year": year, "month": month},
-                url=self.TWSE_URL,
-                metadata={"symbol": symbol, "year": year, "month": month}
-            )
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"TWSE fetch error: {e}")
-            self.record_request(success=False)
-            return SpiderResponse(
-                success=False,
-                error=str(e),
-                url=self.TWSE_URL
-            )
-        except Exception as e:
-            logger.error(f"Unexpected error: {e}")
-            self.record_request(success=False)
-            return SpiderResponse(
-                success=False,
-                error=str(e),
-                url=self.TWSE_URL
-            )
+                response.raise_for_status()
+
+                data = response.json()
+
+                if data.get("stat") != "OK":
+                    logger.warning(f"TWSE API error: {data.get('stat')}")
+                    self.record_request(success=False)
+                    return SpiderResponse(
+                        success=False,
+                        error=f"API error: {data.get('stat')}",
+                        url=self.TWSE_URL,
+                        metadata={"symbol": symbol, "year": year, "month": month},
+                    )
+
+                # 成功
+                items = self.parse_twse_json(data, symbol)
+                self.items.extend(items)
+                for item in items:
+                    self.add_item(item)
+                self.record_request(success=True)
+
+                return SpiderResponse(
+                    success=True,
+                    data={"count": len(items), "symbol": symbol, "year": year, "month": month},
+                    url=self.TWSE_URL,
+                    metadata={"symbol": symbol, "year": year, "month": month},
+                )
+
+            except (requests.RequestException, ValueError) as e:
+                last_error = str(e)
+                logger.warning(
+                    "Attempt %d/%d failed for %s %d/%d: %s",
+                    attempt, max_retries, symbol, year, month, e,
+                )
+                self.record_request(success=False)
+
+                if attempt < max_retries:
+                    delay = 2 ** attempt  # 2s, 4s
+                    logger.info("Retrying in %ds...", delay)
+                    time.sleep(delay)
+
+        # 所有重試都失敗
+        logger.error("All %d attempts failed for %s %d/%d: %s", max_retries, symbol, year, month, last_error)
+        return SpiderResponse(
+            success=False,
+            error=last_error,
+            url=self.TWSE_URL,
+        )
     
     def parse_twse_json(self, data: dict, symbol: str) -> List[StockDailyItem]:
         """
