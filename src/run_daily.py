@@ -51,6 +51,7 @@ def step_spiders() -> tuple:
     from spiders.cb_master_spider import CbMasterSpider
     from spiders.stock_daily_spider import StockDailySpider
     from spiders.tpex_cb_daily_spider import TpexCbDailySpider
+    from spiders.broker_breakdown_spider import BrokerBreakdownSpider
 
     results = {}
     records = {}
@@ -136,6 +137,26 @@ def step_spiders() -> tuple:
             item.to_dict() for item in s.get_items()
         ]
         pipelines["tpex_cb_daily"] = (p, s)
+    except:
+        s.close()
+        raise
+
+    # Broker Breakdown
+    p = PostgresPipeline(table_name="broker_breakdown", batch_size=500, **DB_CONFIG)
+    s = BrokerBreakdownSpider(pipeline=p)
+    s.collect_only = True
+    try:
+        today_str = datetime.now().strftime("%Y%m%d")
+        r = s.fetch_broker_breakdown(today_str, "2330")
+        results["broker_breakdown"] = {
+            "success": r.success,
+            "count": r.data.get("count", 0) if r.data else 0,
+            "error": r.error,
+        }
+        records["broker_breakdown"] = [
+            item.to_dict() for item in s.get_items()
+        ]
+        pipelines["broker_breakdown"] = (p, s)
     except:
         s.close()
         raise
@@ -231,7 +252,7 @@ def step_validate(spider_results: dict, collected_records: dict = None) -> dict:
     global_has_errors = False
 
     try:
-        for table_name in ["stock_master", "stock_daily", "cb_master", "tpex_cb_daily"]:
+        for table_name in ["stock_master", "stock_daily", "cb_master", "tpex_cb_daily", "broker_breakdown"]:
             spider_result = spider_results.get(table_name, {})
 
             if not spider_result.get("success"):

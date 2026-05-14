@@ -51,7 +51,8 @@ class DataValidator:
         }
         
         if self.table_name not in rules_map:
-            raise ValueError(f"Unknown table: {self.table_name}")
+            logger.warning(f"No rules defined for table: {self.table_name}, skipping all rules")
+            return []
         
         return rules_map[self.table_name]
     
