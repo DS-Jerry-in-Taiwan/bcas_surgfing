@@ -263,14 +263,140 @@ class CbMasterItem(BaseItem):
         return bool(self.cb_code and self.underlying_stock)
 
 
+@dataclass
+class BrokerBreakdownItem(BaseItem):
+    """
+    券商分點買賣超明細 Item
+
+    Attributes:
+        date: 交易日期 (YYYYMMDD)
+        symbol: 股票代號
+        broker_id: 券商代號
+        broker_name: 券商名稱
+        buy_volume: 買進股數
+        sell_volume: 賣出股數
+        net_volume: 淨買超股數
+        rank: 排名 (1-10)
+    """
+    __table_name__: str = "broker_breakdown"
+
+    date: str = ""
+    symbol: str = ""
+    broker_id: str = ""
+    broker_name: str = ""
+    buy_volume: int = 0
+    sell_volume: int = 0
+    net_volume: int = 0
+    rank: int = 0
+    created_at: datetime = field(default_factory=_default_datetime)
+    updated_at: datetime = field(default_factory=_default_datetime)
+    source_url: str = ""
+    source_type: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def get_unique_key(self) -> str:
+        return f"{self.date}_{self.symbol}_{self.broker_id}"
+
+    def validate(self) -> bool:
+        return bool(self.date and self.symbol and self.broker_id)
+
+
+@dataclass
+class DailyAnalysisResultItem(BaseItem):
+    """
+    盤後分析結果 Item
+
+    Attributes:
+        date: 分析日期 (YYYY-MM-DD)
+        symbol: 證券代號
+        close_price: 收盤價
+        conversion_value: 轉換價值
+        premium_ratio: 溢價率
+        technical_signal: 技術指標訊號
+        risk_score: 風險評分
+        risk_level: 風險等級
+        broker_risk_pct: 券商風險佔比
+        final_rating: 最終評級
+        is_junk: 是否為垃圾債
+        notes: 備註
+    """
+    __table_name__: str = "daily_analysis_results"
+
+    date: str = ""
+    symbol: str = ""
+    close_price: float = 0.0
+    conversion_value: float = 0.0
+    premium_ratio: float = 0.0
+    technical_signal: str = ""
+    risk_score: float = 0.0
+    risk_level: str = ""
+    broker_risk_pct: float = 0.0
+    final_rating: str = ""
+    is_junk: bool = False
+    notes: str = ""
+    created_at: datetime = field(default_factory=_default_datetime)
+    updated_at: datetime = field(default_factory=_default_datetime)
+    source_url: str = ""
+    source_type: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def get_unique_key(self) -> str:
+        return f"{self.date}_{self.symbol}"
+
+    def validate(self) -> bool:
+        return bool(self.date and self.symbol)
+
+
+@dataclass
+class TradingSignalItem(BaseItem):
+    """
+    交易信號 Item
+
+    Attributes:
+        date: 信號日期 (YYYY-MM-DD)
+        symbol: 證券代號
+        signal_type: 信號類型 (BUY / HOLD / AVOID)
+        confidence: 信心度
+        entry_range: 進場區間
+        stop_loss: 停損價
+        target_price: 目標價
+        notes: 備註
+    """
+    __table_name__: str = "trading_signals"
+
+    date: str = ""
+    symbol: str = ""
+    signal_type: str = ""  # BUY / HOLD / AVOID
+    confidence: float = 0.0
+    entry_range: str = ""
+    stop_loss: float = 0.0
+    target_price: float = 0.0
+    notes: str = ""
+    created_at: datetime = field(default_factory=_default_datetime)
+    updated_at: datetime = field(default_factory=_default_datetime)
+    source_url: str = ""
+    source_type: str = ""
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def get_unique_key(self) -> str:
+        return f"{self.date}_{self.symbol}_{self.signal_type}"
+
+    def validate(self) -> bool:
+        return bool(self.date and self.symbol and self.signal_type)
+
+
 ITEM_REGISTRY: Dict[str, Type[BaseItem]] = {
     "stock_daily": StockDailyItem,
     "tpex_cb_daily": TpexCbDailyItem,
     "stock_master": StockMasterItem,
     "cb_master": CbMasterItem,
+    # ↓ Phase 3.0 新增
+    "broker_breakdown": BrokerBreakdownItem,
+    "daily_analysis_results": DailyAnalysisResultItem,
+    "trading_signals": TradingSignalItem,
 }
 
 
-def get_item_class(table_name: str) -> Optional[Type[BaseItem]]:
-    """根據表名獲取 Item 類"""
-    return ITEM_REGISTRY.get(table_name)
+def get_item_class(table_name: str) -> Type[BaseItem]:
+    """根據表名獲取 Item 類，不存在時拋 KeyError"""
+    return ITEM_REGISTRY[table_name]
