@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant U as run_daily.py
+    participant S as Spider<br/>(StockDailySpider etc.)
+    participant P as PostgresPipeline
+    participant DB as PostgreSQL
+    participant C as DataCleaner
+    Note over U,C: Step 1: 爬蟲
+    U->>S: fetch_daily("2330", 2026, 4)
+    S->>TWSE: GET /exchangeReport/STOCK_DAY
+    TWSE-->>S: JSON response
+    S->>S: parse_twse_json()
+    Note right of S: 民國→西元<br/>千分位去除<br/>validate() 檢查
+    loop 每筆資料
+        S->>P: save_items(item)
+        P->>P: _batch_buffer.append()
+        alt 緩衝區滿 500 筆
+            P->>P: _flush_batch()
+            P->>DB: INSERT INTO stock_daily<br/>(symbol, date, close_price, ...)
+            P->>DB: ON CONFLICT (unique_key)<br/>DO UPDATE SET ..., updated_at=NOW()
+            DB-->>P: OK
+        end
+    end
+    S-->>U: SpiderResponse(success, count)
+    Note over U,C: Step 2: 清洗
+    U->>C: run_all()
+    C->>C: validate_stock_daily()
+    C->>DB: SELECT symbol, date FROM stock_daily<br/>WHERE NOT EXISTS (SELECT 1 FROM stock_master)
+    DB-->>C: missing list (0 rows)
+    C->>DB: UPDATE stock_daily<br/>SET master_check='OK'<br/>WHERE symbol IN stock_master
+    C->>DB: UPDATE stock_daily d<br/>SET name=m.name, industry=m.industry<br/>FROM stock_master m
+    DB-->>C: done
+    C->>C: validate_cb_daily()
+    C->>DB: SELECT cb_code, trade_date FROM tpex_cb_daily<br/>WHERE NOT EXISTS (SELECT 1 FROM cb_master)
+    DB-->>C: missing list (12 rows)
+    C->>DB: UPDATE tpex_cb_daily<br/>SET master_check='OK'<br/>WHERE cb_code IN cb_master
+    C->>DB: UPDATE tpex_cb_daily<br/>SET master_check='NOT_FOUND'<br/>WHERE cb_code NOT IN cb_master
+    C->>DB: UPDATE tpex_cb_daily d<br/>SET cb_name_enriched=m.cb_name,<br/>    conversion_price_enriched=m.conversion_price<br/>FROM cb_master m
+    DB-->>C: done
+    C-->>U: {"stock_daily": {ok:219, nf:0},<br/>       "tpex_cb_daily": {ok:26976, nf:12}}

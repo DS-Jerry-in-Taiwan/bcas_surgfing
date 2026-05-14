@@ -1,0 +1,45 @@
+flowchart TB
+    subgraph Source["資料源"]
+        TWSE["TWSE API"]
+        TPEX_CB["TPEx CB CSV"]
+    end
+
+    subgraph NewPath["新路徑: run_daily.py"]
+        NS1["StockMasterSpider"]
+        NS2["StockDailySpider"]
+        NS3["CbMasterSpider"]
+        NS4["TpexCbDailySpider"]
+        NP["PostgresPipeline<br/>直接寫 DB"]
+    end
+
+    subgraph OldPath["舊路徑: main_crawler.py"]
+        OS1["crawlers/ 舊爬蟲"]
+        OR["data/raw/ 原始 CSV"]
+        OC["etl/cleaner.py<br/>CSV 格式解析"]
+        OV["etl/validate_and_enrich.py<br/>CSV 交叉驗證"]
+        OI["etl/importer.py<br/>CSV → DB"]
+    end
+
+    subgraph DB["PostgreSQL 四張表"]
+        SM["stock_master<br/>symbol, name, industry"]
+        SD["stock_daily<br/>symbol, date, close_price, volume"]
+        CM["cb_master<br/>cb_code, cb_name, conversion_price"]
+        CD["tpex_cb_daily<br/>cb_code, trade_date, closing_price"]
+    end
+
+    subgraph Cleaner["DataCleaner (run_cleaner.py)"]
+        C1["比對 stock_daily vs stock_master<br/>SET master_check, name, industry"]
+        C2["比對 tpex_cb_daily vs cb_master<br/>SET master_check, cb_name_enriched,<br/>conversion_price_enriched"]
+    end
+
+    TWSE --> NS1 & NS2
+    TPEX_CB --> NS3 & NS4
+    NS1 & NS2 & NS3 & NS4 --> NP
+    NP --> SM & SD & CM & CD
+
+    TPEX_CB --> OS1 --> OR --> OC --> OV --> OI --> CD
+
+    SD --> C1
+    SM ---|"讀取比對"| C1
+    CD --> C2
+    CM ---|"讀取比對"| C2

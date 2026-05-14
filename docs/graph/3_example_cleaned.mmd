@@ -1,0 +1,14 @@
+flowchart TB
+    subgraph AFTER["cleaner 前 vs 後 (stock_daily)"]
+        BEFORE["爬蟲剛寫入<br/>symbol=2330, date=2026-04-28<br/>close_price=850, volume=5M<br/>master_check=NULL, name=NULL, industry=NULL"]
+        AFTER2["cleaner 跑完<br/>symbol=2330, date=2026-04-28<br/>close_price=850, volume=5M<br/>master_check=OK, name=台積電, industry=半導體"]
+    end
+
+    BEFORE --> AFTER2
+
+    subgraph Not_Found["找不到 master 的案例"]
+        NF_BEFORE["symbol=99999, date=2026-04-28<br/>close_price=100<br/>master_check=NULL"]
+        NF_AFTER["symbol=99999, date=2026-04-28<br/>close_price=100<br/>master_check=NOT_FOUND<br/>name=NULL, industry=NULL"]
+    end
+
+    NF_BEFORE --> NF_AFTER

@@ -1,0 +1,29 @@
+sequenceDiagram
+    participant Run as "run_daily.py"
+    participant Spider as "Spider"
+    participant Pipe as "PostgresPipeline"
+    participant DB as "PostgreSQL"
+    participant Clean as "DataCleaner"
+
+    Note over Run,Clean: Step 1: 爬蟲寫入 DB
+    Run->>Spider: fetch_daily("2330", 2026, 4)
+    Spider->>TWSE: GET STOCK_DAY API
+    TWSE-->>Spider: JSON (民國年、千分位)
+    Spider->>Spider: parse & 清理 (民國→西元、去逗號)
+    loop 每筆資料
+        Spider->>Pipe: save_items(item)
+        alt 滿 500 筆
+            Pipe->>DB: INSERT ... ON CONFLICT DO UPDATE
+            DB-->>Pipe: OK
+        end
+    end
+    Spider-->>Run: {success, count}
+
+    Note over Run,Clean: Step 2: 清洗 (原地 UPDATE)
+    Run->>Clean: run_all()
+    Clean->>DB: UPDATE stock_daily SET master_check='OK'
+    Clean->>DB: UPDATE stock_daily SET name, industry FROM stock_master
+    Clean->>DB: UPDATE tpex_cb_daily SET master_check='OK'|'NOT_FOUND'
+    Clean->>DB: UPDATE tpex_cb_daily SET cb_name_enriched, conversion_price_enriched FROM cb_master
+    DB-->>Clean: done
+    Clean-->>Run: {stock_daily: {ok, not_found}, tpex_cb_daily: {ok, not_found}}

@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph Source["資料源"]
+        TWSE["TWSE API<br/>isin.twse.com.tw"]
+        TPEX_CB["TPEx CB CSV<br/>tpex.org.tw/storage/..."]
+    end
+    subgraph NewPath["新路徑 run_daily.py"]
+        direction TB
+        NS1["StockMasterSpider<br/>fetch_twse()"]
+        NS2["StockDailySpider<br/>fetch_daily()"]
+        NS3["CbMasterSpider<br/>fetch_cb_master()"]
+        NS4["TpexCbDailySpider<br/>fetch_daily()"]
+        NP["PostgresPipeline<br/>_flush_batch()<br/>INSERT ... ON CONFLICT<br/>DO UPDATE SET ..."]
+    end
+    subgraph OldPath["舊路徑 main_crawler.py"]
+        direction TB
+        OS1["crawlers/tpex_daily.py<br/>fetch_tpex_cb_daily_csv()"]
+        OS2["crawlers/tpex_master.py<br/>fetch_tpex_cb_master()"]
+        OR["data/raw/ (CSV)"]
+        OC["etl/cleaner.py<br/>HEADER/BODY 格式解析"]
+        OV["etl/validate_and_enrich.py<br/>CSV 層交叉驗證"]
+        OI["etl/importer.py<br/>CSV → DB"]
+    end
+    subgraph DB_Write["PostgreSQL 寫入"]
+        direction TB
+        SM["stock_master<br/>symbol, name, industry, ..."]
+        SD["stock_daily<br/>symbol, date, close_price,<br/>volume, ..."]
+        CM["cb_master<br/>cb_code, cb_name,<br/>conversion_price, ..."]
+        CD["tpex_cb_daily<br/>cb_code, trade_date,<br/>closing_price, ..."]
+    end
+    subgraph Cleaner["DataCleaner (run_cleaner.py)"]
+        direction TB
+        C1["UPDATE stock_daily<br/>SET master_check = 'OK' / 'NOT_FOUND'<br/>WHERE symbol 比對 stock_master"]
+        C2["UPDATE stock_daily d<br/>SET name = m.name<br/>    industry = m.industry<br/>FROM stock_master m<br/>WHERE d.symbol = m.symbol"]
+        C3["UPDATE tpex_cb_daily<br/>SET master_check = 'OK' / 'NOT_FOUND'<br/>WHERE cb_code 比對 cb_master"]
+        C4["UPDATE tpex_cb_daily d<br/>SET cb_name_enriched = m.cb_name<br/>    conversion_price_enriched = m.conversion_price<br/>FROM cb_master m<br/>WHERE d.cb_code = m.cb_code"]
+    end
+    TWSE --> NS1
+    TWSE --> NS2
+    TPEX_CB --> NS3
+    TPEX_CB --> NS4
+    NS1 --> NP
+    NS2 --> NP
+    NS3 --> NP
+    NS4 --> NP
+    NP --> SM
+    NP --> SD
+    NP --> CM
+    NP --> CD
+    SM --> C1
+    SD --> C1
+    C1 --> C2
+    CM --> C3
+    CD --> C3
+    C3 --> C4
+    TPEX_CB --> OS1
+    TPEX_CB --> OS2
+    OS1 --> OR
+    OS2 --> OR
+    OR --> OC
+    OC --> OV
+    OV --> OI
+    OI --> CD
