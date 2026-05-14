@@ -1,0 +1,12 @@
+[
+  {"broker_id": "9200", "broker_name": "凱基-台北", "risk_level": "HIGH", "category": "DAY_TRADER"},
+  {"broker_id": "9800", "broker_name": "元大-台北", "risk_level": "HIGH", "category": "DAY_TRADER"},
+  {"broker_id": "9100", "broker_name": "群益-台北", "risk_level": "HIGH", "category": "DAY_TRADER"},
+  {"broker_id": "9600", "broker_name": "富邦-台北", "risk_level": "MEDIUM", "category": "SUSPECTED"},
+  {"broker_id": "9300", "broker_name": "統一-台北", "risk_level": "MEDIUM", "category": "SUSPECTED"},
+  {"broker_id": "9700", "broker_name": "永豐-台北", "risk_level": "MEDIUM", "category": "SUSPECTED"},
+  {"broker_id": "9400", "broker_name": "兆豐-台北", "risk_level": "MEDIUM", "category": "SUSPECTED"},
+  {"broker_id": "9500", "broker_name": "華南-台北", "risk_level": "LOW", "category": "FLAGGED"},
+  {"broker_id": "9900", "broker_name": "國泰-台北", "risk_level": "LOW", "category": "FLAGGED"},
+  {"broker_id": "9150", "broker_name": "台新-台北", "risk_level": "LOW", "category": "FLAGGED"}
+]
