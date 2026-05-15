@@ -19,7 +19,9 @@ import logging
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, _THIS_DIR)                                # src/
+sys.path.insert(0, os.path.abspath(os.path.join(_THIS_DIR, "..")))  # project root (for src.xxx imports)
 
 logging.basicConfig(
     level=logging.INFO,

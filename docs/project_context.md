@@ -1,6 +1,6 @@
 # BCAS Quant 專案上下文摘要
 
-> 最後更新: 2026-05-13
+> 最後更新: 2026-05-15
 > 用途: 新 session 啟動時讀取此文件，快速掌握專案狀態
 
 ---
@@ -11,7 +11,7 @@ BCAS Quant 是一個 CBAS 盤後自動化分析系統 (EOD Analytics System)。
 每日台股收盤後自動啟動，蒐集現股與可轉債 (CB) 報價及籌碼數據，
 計算溢價率與隔日沖風險，產出次日交易戰略清單。
 
-- **版本**: 3.0.0
+- **版本**: 3.1.0
 - **語言**: Python (7,160+ 行) + Go (scheduler)
 - **資料庫**: PostgreSQL 14 (Docker)
 - **部署**: Docker Compose (postgres + pipeline + scheduler)
@@ -79,7 +79,8 @@ bcas_quant/
 │   │   ├── phase2_raw_data_validation/ Phase 2 (資料驗證)
 │   │   ├── phase3_0 ~ phase3_3/   Phase 3 (EOD 分析系統)
 │   │   ├── phase4/                BrokerBreakdown 替代方案調查
-│   │   └── phase5/                BSR + ddddocr 整合規劃
+│   │   ├── phase5/                BSR + ddddocr 整合規劃 (已完成)
+│   │   └── phase6/                E2E 整合驗證
 │   └── project_context.md         本文件
 └── scripts/
     └── start_eod.sh              EOD 啟動腳本
@@ -116,7 +117,7 @@ python src/run_eod_analysis.py --stage 4   # 報表
 
 ### Phase 3.0 - 基礎設施
 - src/db/init_eod_tables.sql - 4 張分析用表
-- src/spiders/broker_breakdown_spider.py - 分點爬蟲 (需修復 API)
+- src/spiders/broker_breakdown_spider.py - 分點爬蟲 (BSR+OCR, ✅已恢復)
 - src/configs/broker_blacklist.json - 10 筆券商黑名單
 - src/framework/base_item.py - 3 個新 Item 類
 - src/run_daily.py - 整合 BrokerBreakdownSpider
@@ -146,72 +147,56 @@ python src/run_eod_analysis.py --stage 4   # 報表
 
 ---
 
-## 四、目前進行中的議題
+## 四、Phase 5 & 6 完成狀態
 
-### 核心問題: BrokerBreakdownSpider 資料源失效
+### Phase 5 — BSR + ddddocr 整合 ✅ 已完成
 
-TWSE MI_20S API (券商分點買賣超) 已下架，回傳 302 -> 404。
+BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 
-已調查的替代方案:
-- TWSE OpenAPI (95 個端點): 無 MI_20S
-- twstock SDK: 無分點資料
-- FinMind: 有但要付費 Sponsor
-- Shioaji (永豐): 需永豐帳戶
-- Goodinfo 爬蟲: 已改 SPA
-- BSR 網站: 有資料但需要驗證碼
+| Stage | 說明 | 測試 | 狀態 |
+|-------|------|:----:|:----:|
+| Stage 1 | ddddocr OCR 測試 (100% 辨識率) | — | ✅ |
+| Stage 2 | BsrClient (session/captcha/CSV) | 69 tests | ✅ |
+| Stage 3 | BrokerBreakdownSpider 改寫 | 18 tests | ✅ |
+| Stage 4 | RiskAssessor 恢復 (S/A/B/C 評級鏈) | 72 tests | ✅ |
+| Stage 5 | E2E 整合驗證 | 16 tests | ✅ |
+| 🔥 Hotfix | BSR CSV 格式變更 (437 券商解析成功) | (含於 Stage 2) | ✅ |
+| 🔥 TWSE Retry | rate limit 指數退避重試 | 3 tests | ✅ |
 
-### 最新結論: BSR + ddddocr
+**BSR CSV Hotfix**: BSR 網站改變回傳格式（HTML table → bsContent.aspx CSV），`BsrClient._parse_result()` 已支援雙格式：
+先檢測 CSV 下載連結 → 下載 CSV → 解析彙總 437 家券商 → fallback 舊 table_blue
 
-BSR 網站 (https://bsr.twse.com.tw/bshtm/) 有完整的分點買賣超資料。
+### Phase 6 — E2E 整合驗證 ✅ 已完成
 
-使用 ddddocr (輕量級開源 OCR) 測試結果:
-- Captcha 辨識率: 100% (26/26)
-- 平均辨識時間: 17ms
-- 端到端測試: 成功抓取 2330 台積電今日完整買賣日報 (60 頁)
+首次使用真實資料執行完整 Pipeline 端到端驗證。
 
-### 設計規範 (務必遵守)
+| 階段 | 結果 | 說明 |
+|------|:----:|------|
+| 5 個爬蟲真實資料測試 | ✅ | 全部 success=True |
+| run_daily.py (validate-only) | ✅ | 295 單元測試通過 |
+| run_daily.py (force-validation, flush) | ✅ | DB 寫入驗證通過 |
+| run_eod_analysis.py (4 階段) | ✅ | 零崩潰，非阻斷設計正常 |
+| EOD Pipeline import path 修復 | ✅ | run_eod_analysis.py sys.path 修正 |
 
-必須遵循:
-- Spider __init__ 接受 pipeline=None 參數
-- 使用 self.items + self.add_item(item) 同步呼叫
-- 使用 collect_only = True
-- 在 run_daily.py 的 step_spiders() 中註冊新爬蟲
-- Item 類別註冊至 ITEM_REGISTRY
+### 已知 Issue
 
-禁止事項:
-- 禁止使用 self._items (必須用 self.items)
-- 禁止繞過 self.add_item(item)
-- 禁止建立 security_profile 表或 SecurityProfileItem
-- 禁止建立 ConversionPriceSpider (CbMasterSpider 已涵蓋)
+| ID | 問題 | 影響 | 嚴重度 | 狀態 |
+|----|------|------|:------:|:----:|
+| E2E-001 | CbMasterSpider CSV column mismatch (0 vs 22) → cb_master 0 筆 | PremiumCalculator 無法計算溢價率 | 🟡 中 | **Open** |
+| E2E-002 | StockDailySpider 硬編碼只有 2330 | 僅 1 檔股票有日行情 | 🟢 低 | **Open** |
+| E2E-004 | Clean 階段 `master_check` 欄位不存在於 DB | step_clean 失敗 | 🟡 中 | **Open** |
 
----
+### 測試統計
 
-## 五、Phase 5 待執行項目
-
-### 文件位置
-docs/agent_context/phase5/ (5 份規劃文件, 2055 行)
-
-### 執行計畫
-
-```
-Day 1: OCR 測試 (3h) -> ✅ 已完成 (100% 辨識率)
-Day 2: BsrClient 封裝 (6h) -> ✅ 已完成
-Day 3: BrokerBreakdownSpider 改寫 (4h) -> ✅ 已完成
-Day 4: RiskAssessor 恢復 (3h) -> ✅ 已完成 (Stage 4)
-Day 5: E2E 驗證 (2h) -> ⬅️ 當前 (Stage 5)
-```
-
-### 待實作模組
-
-| 模組 | 說明 | 狀態 |
-|------|------|------|
-| src/spiders/bsr_client.py | BSR 網站客戶端 | ✅ 完成 |
-| src/spiders/ocr_solver.py | ddddocr 封裝 | ✅ 完成 |
-| src/spiders/broker_breakdown_spider.py (改寫) | 改用 BsrClient | ✅ 完成 |
-| src/analytics/chip_profiler.py | 黑名單比對 | ✅ 恢復 |
-| src/analytics/risk_assessor.py | S/A/B/C 評級 | ✅ 恢復 |
-
-**Phase 5 完成度**: Stage 1-4 ✅ 完成 | **Stage 5 進行中** (E2E 整合驗證)
+| 測試群組 | 測試數 | 狀態 |
+|---------|:------:|:----:|
+| BsrClient | 69 | ✅ |
+| BrokerBreakdownSpider | 18 | ✅ |
+| RiskAssessor + ChipProfiler | 72 | ✅ |
+| PremiumCalculator + TechnicalAnalyzer | 58 | ✅ |
+| Phase 3 報表 + Pipeline | 21 | ✅ |
+| Phase 3 Items + 整合 | 57 | ✅ |
+| **核心邏輯 (phase5 + 回歸)** | **295** | **✅ 零回歸** |
 
 ---
 
@@ -229,9 +214,9 @@ from src.run_daily import DB_CONFIG
 # DB_CONFIG = dict(host="localhost", port=5432, database="cbas", user="postgres", password="postgres")
 ```
 
-### 9 張表
+### 8 張表 (實際存在)
 
-既有 (5張): stock_master, stock_daily, cb_master, cb_daily (hypertable), tpex_cb_daily
+既有 (4張): stock_master, stock_daily, stock_daily (hypertable 已移除), cb_master, tpex_cb_daily
 Phase 3 (4張): broker_breakdown, daily_analysis_results, trading_signals, broker_blacklist
 
 ---
@@ -255,14 +240,10 @@ python tests/test_bsr_captcha.py --count 10
 
 | 文件 | 位置 | 說明 |
 |------|------|------|
-| 高階規劃書 | docs/agent_context/phase3/analysis_mode_dev_doc.md | EOD 系統原始需求 |
-| Phase 3 開發文檔 | docs/agent_context/phase3_0 ~ phase3_3/ | 各階段開發目標、流程、角色 |
-| Phase 4 調查報告 | docs/agent_context/phase4/ | 替代資料源分析 (5 方案) |
-| Phase 5 規劃 | docs/agent_context/phase5/ | BSR + ddddocr 整合計畫 |
-| Phase 5 Stage 4 任務規劃 | docs/agent_context/phase5/task_plan_stage4.md | RiskAssessor 恢復詳細規劃 |
-| Phase 5 Stage 4 Developer Prompt | docs/agent_context/phase5/developer_prompt_stage4.md | 開發者操作指引 |
-| Phase 5 Stage 5 任務規劃 | docs/agent_context/phase5/task_plan_stage5.md | E2E 整合驗證規劃 |
-| Phase 5 Stage 5 Developer Prompt | docs/agent_context/phase5/developer_prompt_stage5.md | 開發者操作指引 |
-| **BSR 解析器 Hotfix** | docs/agent_context/phase5/task_plan_bsr_fix.md | BSR 回傳格式變更修正 |
-| 優化路線圖 | docs/OPTIMIZATION_ROADMAP.md | 效能優化規劃 |
-| 系統架構 | SYSTEM_ARCHITECTURE.md | 完整架構文件 |
+| 高階規劃書 | `docs/agent_context/phase3/analysis_mode_dev_doc.md` | EOD 系統原始需求 |
+| Phase 5 開發日誌 | `docs/agent_context/phase5/development_log.md` | BSR+OCR 整合完整記錄 |
+| BSR 解析器 Hotfix | `docs/agent_context/phase5/task_plan_bsr_fix.md` | BSR CSV 格式變更修正 |
+| Phase 6 任務規劃 | `docs/agent_context/phase6/task_plan.md` | E2E 整合驗證 (本階段) |
+| Phase 6 Developer Prompt | `docs/agent_context/phase6/developer_prompt.md` | E2E 驗證執行指引 |
+| 優化路線圖 | `docs/OPTIMIZATION_ROADMAP.md` | 效能優化規劃 |
+| 系統架構 | `SYSTEM_ARCHITECTURE.md` | 完整架構文件 |
