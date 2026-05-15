@@ -71,6 +71,32 @@ class DataCleaner:
             "master_check_updated": True,
         }
 
+    # ─── enirch cb_master (GAP-01) ─────────────────────────────
+
+    def enrich_cb_master(self) -> dict:
+        """從 cb_code 前4碼推導 underlying_stock（標的股票代號）"""
+        self.cur.execute("""
+            UPDATE cb_master c
+            SET underlying_stock = m.symbol
+            FROM stock_master m
+            WHERE m.symbol = SUBSTRING(c.cb_code, 1, 4)
+              AND (c.underlying_stock IS NULL OR c.underlying_stock = '')
+        """)
+        matched = self.cur.rowcount
+        self.conn.commit()
+
+        self.cur.execute("""
+            SELECT cb_code, cb_name FROM cb_master
+            WHERE underlying_stock IS NULL OR underlying_stock = ''
+            LIMIT 10
+        """)
+        unmatched = [f"{r[0]} ({r[1]})" for r in self.cur.fetchall()]
+
+        return {
+            "cb_master_total_matched": matched,
+            "cb_master_unmatched_samples": unmatched,
+        }
+
     # ─── tpex_cb_daily vs cb_master ─────────────────────────────
 
     def validate_cb_daily(self) -> dict:
@@ -126,6 +152,7 @@ class DataCleaner:
             "start_time": start.isoformat(),
             "stock_daily": self.validate_stock_daily(),
             "tpex_cb_daily": self.validate_cb_daily(),
+            "cb_master_enrich": self.enrich_cb_master(),
         }
         elapsed = (datetime.now() - start).total_seconds()
         result["elapsed_seconds"] = round(elapsed, 2)
