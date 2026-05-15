@@ -93,10 +93,15 @@ class PremiumCalculator:
 
         try:
             # 讀取 tpex_cb_daily (當日 CB 日行情)
+            # 注意: tpex_cb_daily 的 conversion_price 和 underlying_stock
+            # 來自 CSV 預設值 (0 和空字串)，需從 cb_master 取得真實值
             cursor.execute("""
-                SELECT t.cb_code, t.closing_price, t.conversion_price,
-                       t.underlying_stock, t.premium_rate
+                SELECT t.cb_code, t.closing_price,
+                       COALESCE(NULLIF(m.conversion_price, ''), t.conversion_price) AS conversion_price,
+                       COALESCE(NULLIF(m.underlying_stock, ''), t.underlying_stock) AS underlying_stock,
+                       t.premium_rate
                 FROM tpex_cb_daily t
+                LEFT JOIN cb_master m ON t.cb_code = m.cb_code
                 WHERE t.trade_date = %s
             """, (date,))
             cb_records = cursor.fetchall()
@@ -104,6 +109,9 @@ class PremiumCalculator:
             results: List[AnalysisResult] = []
             for cb_code, cb_close, conv_price, under_stock, _ in cb_records:
                 if not cb_close or not conv_price or not under_stock:
+                    continue
+                # conv_price 可能為 '0' (字串)，也跳過
+                if float(conv_price) <= 0:
                     continue
 
                 # 讀取對應現股收盤價

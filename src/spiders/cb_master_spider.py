@@ -143,6 +143,17 @@ class CbMasterSpider(BaseSpider):
                     url=url
                 )
             
+            # TPEx 對無資料日期回傳 HTTP 200 + HTML 404 頁面（而非 HTTP 404）
+            raw_text = response.content.decode(self.CSV_CONFIG.encoding, errors="ignore")
+            if raw_text.lstrip().startswith("<!DOCTYPE") or raw_text.lstrip().startswith("<html"):
+                logger.warning(f"TPEx returned HTML instead of CSV for date={date}")
+                self.record_request(success=False)
+                return SpiderResponse(
+                    success=False,
+                    error="TPEx returned HTML (no data for this date)",
+                    url=url
+                )
+            
             items = self.parse_cb_csv(response.content, date)
             self.items.extend(items)
             
