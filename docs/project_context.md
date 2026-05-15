@@ -178,13 +178,15 @@ BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 | run_eod_analysis.py (4 階段) | ✅ | 零崩潰，非阻斷設計正常 |
 | EOD Pipeline import path 修復 | ✅ | run_eod_analysis.py sys.path 修正 |
 
-### 已知 Issue
+### Phase 6 發現並修復的問題
 
-| ID | 問題 | 影響 | 嚴重度 | 狀態 |
-|----|------|------|:------:|:----:|
-| E2E-001 | CbMasterSpider CSV column mismatch (0 vs 22) → cb_master 0 筆 | PremiumCalculator 無法計算溢價率 | 🟡 中 | **Open** |
-| E2E-002 | StockDailySpider 硬編碼只有 2330 | 僅 1 檔股票有日行情 | 🟢 低 | **Open** |
-| E2E-004 | Clean 階段 `master_check` 欄位不存在於 DB | step_clean 失敗 | 🟡 中 | **Open** |
+| 問題 | 修復 | 檔案 |
+|------|------|------|
+| CbMaster HTML 誤判 (TPEx 回傳 200+HTML) | ✅ 偵測 `<!DOCTYPE` 內容 | `cb_master_spider.py` |
+| PremiumCalculator 讀錯 conversion_price | ✅ JOIN cb_master 取代 tpex_cb_daily | `premium_calculator.py` |
+| EOD Pipeline sys.path 缺 project root | ✅ 加入 `..` 路徑 | `run_eod_analysis.py` |
+
+---
 
 ### 測試統計
 
@@ -197,6 +199,33 @@ BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 | Phase 3 報表 + Pipeline | 21 | ✅ |
 | Phase 3 Items + 整合 | 57 | ✅ |
 | **核心邏輯 (phase5 + 回歸)** | **295** | **✅ 零回歸** |
+
+---
+
+## 五、待修項目 (Phase 3 設計缺口)
+
+以下問題在 Phase 6 E2E 驗證中被發現，屬於 Phase 3 架構設計時遺留的缺口，
+**不是** Phase 5 或 Phase 6 的範圍。
+
+| ID | 問題 | 根源 | 影響 | 優先級 |
+|:--:|------|------|------|:------:|
+| GAP-01 | **`cb_master.underlying_stock` 未填入** | Phase 3 加了欄位但沒寫 enrichment | PremiumCalculator 0 筆 → 分析鏈空輸出 | 🔴 **高** |
+| GAP-02 | **DataCleaner 的 `master_check` 欄位不存在** | Phase 3 寫了 SQL 但 schema 沒加該欄位 | `step_clean()` 崩潰 | 🟡 中 |
+| GAP-03 | **StockDailySpider 只抓 2330** | Phase 3 設計即為 demo | 僅 1 檔有日行情 | 🟢 低 |
+
+### GAP-01 修復方向
+
+在 DataCleaner（或獨立的 enrichment step）加入：
+
+```sql
+UPDATE cb_master c
+SET underlying_stock = m.symbol
+FROM stock_master m
+WHERE m.symbol = SUBSTRING(c.cb_code, 1, 4)
+  AND (c.underlying_stock IS NULL OR c.underlying_stock = '');
+```
+
+目前已確認 `cb_code[:4]` 可命中 **202/378 (53%)** 的 CB，其餘需 fuzzy match `cb_name` 對 `stock_master.name`。
 
 ---
 

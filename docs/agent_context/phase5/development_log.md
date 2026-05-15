@@ -1,6 +1,10 @@
 # Phase 5 開發日誌
 
-> 最後更新: 2026-05-14
+> 最後更新: 2026-05-15
+> 狀態: ✅ Phase 5 全部完成 (BSR+OCR 整合)
+> 
+> Phase 5 範圍: BSR Client → BrokerBreakdownSpider 改寫 → RiskAssessor 恢復
+> Phase 6 接續: 請見 `docs/agent_context/phase6/development_log.md`
 
 ---
 
