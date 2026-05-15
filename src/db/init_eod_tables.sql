@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS broker_breakdown (
     sell_volume BIGINT DEFAULT 0,
     net_volume BIGINT DEFAULT 0,
     rank INT DEFAULT 0,
+    source_url TEXT,
+    source_type VARCHAR(32) DEFAULT 'bsr',
     created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (date, symbol, broker_id)
 );
