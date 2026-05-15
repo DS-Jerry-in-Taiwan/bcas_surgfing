@@ -11,7 +11,7 @@ BCAS Quant 是一個 CBAS 盤後自動化分析系統 (EOD Analytics System)。
 每日台股收盤後自動啟動，蒐集現股與可轉債 (CB) 報價及籌碼數據，
 計算溢價率與隔日沖風險，產出次日交易戰略清單。
 
-- **版本**: 3.1.0
+- **版本**: 3.2.0
 - **語言**: Python (7,160+ 行) + Go (scheduler)
 - **資料庫**: PostgreSQL 14 (Docker)
 - **部署**: Docker Compose (postgres + pipeline + scheduler)
@@ -80,7 +80,8 @@ bcas_quant/
 │   │   ├── phase3_0 ~ phase3_3/   Phase 3 (EOD 分析系統)
 │   │   ├── phase4/                BrokerBreakdown 替代方案調查
 │   │   ├── phase5/                BSR + ddddocr 整合規劃 (已完成)
-│   │   └── phase6/                E2E 整合驗證
+│   │   ├── phase6/                E2E 整合驗證
+│   │   └── phase7/                分析鏈修復 (enrichment)
 │   └── project_context.md         本文件
 └── scripts/
     └── start_eod.sh              EOD 啟動腳本
@@ -147,7 +148,7 @@ python src/run_eod_analysis.py --stage 4   # 報表
 
 ---
 
-## 四、Phase 5 & 6 完成狀態
+## 四、Phase 5 & 6 & 7 完成狀態
 
 ### Phase 5 — BSR + ddddocr 整合 ✅ 已完成
 
@@ -186,6 +187,25 @@ BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 | PremiumCalculator 讀錯 conversion_price | ✅ JOIN cb_master 取代 tpex_cb_daily | `premium_calculator.py` |
 | EOD Pipeline sys.path 缺 project root | ✅ 加入 `..` 路徑 | `run_eod_analysis.py` |
 
+### Phase 7 — 分析鏈修復 ✅ 已完成
+
+修復 DataCleaner (GAP-02) + 新增 enrich_cb_master (GAP-01)，首次產出完整分析鏈結果。
+
+| 項目 | 結果 | 狀態 |
+|------|:----:|:----:|
+| DataCleaner: master_check 欄位補齊 | ✅ `stock_daily` + `tpex_cb_daily` 已加入 | ✅ |
+| enrich_cb_master: cb_code[:4] → stock symbol | ✅ **202/378 筆**配對成功 | ✅ |
+| PremiumCalculator 產出 | ✅ **130 筆**溢價率計算 | ✅ |
+| RiskAssessor 評級 | 🟢 S=96 / 🔴 C=5 | ✅ |
+| Trading Signals | ✅ BUY=96 / AVOID=5 | ✅ |
+| EOD 報表 | ✅ 4,324 chars 完整戰略清單 | ✅ |
+| 單元測試 | ✅ 295 passed 零回歸 | ✅ |
+
+**修復檔案**:
+| 檔案 | 變更 | 說明 |
+|------|:----:|------|
+| `src/etl/run_cleaner.py` | +27 行 | 新增 `enrich_cb_master()`，`run_all()` 加入呼叫 |
+
 ---
 
 ### 測試統計
@@ -207,25 +227,28 @@ BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 以下問題在 Phase 6 E2E 驗證中被發現，屬於 Phase 3 架構設計時遺留的缺口，
 **不是** Phase 5 或 Phase 6 的範圍。
 
-| ID | 問題 | 根源 | 影響 | 優先級 |
-|:--:|------|------|------|:------:|
-| GAP-01 | **`cb_master.underlying_stock` 未填入** | Phase 3 加了欄位但沒寫 enrichment | PremiumCalculator 0 筆 → 分析鏈空輸出 | 🔴 **高** |
-| GAP-02 | **DataCleaner 的 `master_check` 欄位不存在** | Phase 3 寫了 SQL 但 schema 沒加該欄位 | `step_clean()` 崩潰 | 🟡 中 |
-| GAP-03 | **StockDailySpider 只抓 2330** | Phase 3 設計即為 demo | 僅 1 檔有日行情 | 🟢 低 |
+| ID | 問題 | 根源 | 影響 | 狀態 |
+|:--:|------|------|------|:----:|
+| GAP-01 | **`cb_master.underlying_stock` 未填入** | Phase 3 加了欄位但沒寫 enrichment | PremiumCalculator 0 筆 → 分析鏈空輸出 | ✅ **已修復** (Phase 7) |
+| GAP-02 | **DataCleaner 的 `master_check` 欄位不存在** | Phase 3 寫了 SQL 但 schema 沒加該欄位 | `step_clean()` 崩潰 | ✅ **已修復** (Phase 7) |
+| GAP-03 | **StockDailySpider 只抓 2330** | Phase 3 設計即為 demo | 僅 1 檔有日行情 | 🟢 低 — 待處理 |
 
-### GAP-01 修復方向
+### 已修復的 GAP-01
 
-在 DataCleaner（或獨立的 enrichment step）加入：
+在 DataCleaner 新增 `enrich_cb_master()`，用 `cb_code[:4]` 比對 `stock_master.symbol`：
 
-```sql
-UPDATE cb_master c
-SET underlying_stock = m.symbol
-FROM stock_master m
-WHERE m.symbol = SUBSTRING(c.cb_code, 1, 4)
-  AND (c.underlying_stock IS NULL OR c.underlying_stock = '');
+```python
+def enrich_cb_master(self) -> dict:
+    self.cur.execute("""
+        UPDATE cb_master c
+        SET underlying_stock = m.symbol
+        FROM stock_master m
+        WHERE m.symbol = SUBSTRING(c.cb_code, 1, 4)
+          AND (c.underlying_stock IS NULL OR c.underlying_stock = '')
+    """)
 ```
 
-目前已確認 `cb_code[:4]` 可命中 **202/378 (53%)** 的 CB，其餘需 fuzzy match `cb_name` 對 `stock_master.name`。
+結果: **202/378 (53%)** 成功配對，其餘為上櫃股或 CB code 非 5 碼格式。
 
 ---
 
@@ -272,7 +295,9 @@ python tests/test_bsr_captcha.py --count 10
 | 高階規劃書 | `docs/agent_context/phase3/analysis_mode_dev_doc.md` | EOD 系統原始需求 |
 | Phase 5 開發日誌 | `docs/agent_context/phase5/development_log.md` | BSR+OCR 整合完整記錄 |
 | BSR 解析器 Hotfix | `docs/agent_context/phase5/task_plan_bsr_fix.md` | BSR CSV 格式變更修正 |
-| Phase 6 任務規劃 | `docs/agent_context/phase6/task_plan.md` | E2E 整合驗證 (本階段) |
+| Phase 6 任務規劃 | `docs/agent_context/phase6/task_plan.md` | E2E 整合驗證 |
 | Phase 6 Developer Prompt | `docs/agent_context/phase6/developer_prompt.md` | E2E 驗證執行指引 |
+| Phase 7 任務規劃 | `docs/agent_context/phase7/task_plan.md` | 分析鏈修復 (enrichment) |
+| Phase 7 Developer Prompt | `docs/agent_context/phase7/developer_prompt.md` | 修復執行指引 |
 | 優化路線圖 | `docs/OPTIMIZATION_ROADMAP.md` | 效能優化規劃 |
 | 系統架構 | `SYSTEM_ARCHITECTURE.md` | 完整架構文件 |
