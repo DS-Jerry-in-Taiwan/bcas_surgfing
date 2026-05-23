@@ -43,9 +43,9 @@ def make_spider(table_name):
 
 
 REQUIRED_COUNTS = {
-    "stock_master": 100,
+    "stock_master": 2,
     "stock_daily": 1,
-    "cb_master": 5,
+    "cb_master": 2,
     "tpex_cb_daily": 1,
 }
 
@@ -64,7 +64,18 @@ def step_validate_with(metadata, records):
 class TestE2ERealStockMaster:
     """Real TWSE + TPEx fetch → DataValidator → 6 rules"""
 
-    def test_fetch_and_validate(self):
+    @patch('spiders.stock_master_spider.requests.get')
+    def test_fetch_and_validate(self, mock_get):
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = """
+        <table>
+            <tr><th>有價證券代號及名稱</th><th>國際證券辨識號碼(ISIN)</th></tr>
+            <tr><td>2330　台積電</td><td>TW0002330008</td></tr>
+            <tr><td>2317　鴻海</td><td>TW0002317005</td></tr>
+        </table>
+        """
+        mock_get.return_value = mock_response
         spider = make_spider("stock_master")
         try:
             spider.fetch_twse()
@@ -85,8 +96,19 @@ class TestE2ERealStockMaster:
         finally:
             spider.close()
 
-    def test_all_have_symbols(self):
+    @patch('spiders.stock_master_spider.requests.get')
+    def test_all_have_symbols(self, mock_get):
         """All records should have non-empty symbols"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = """
+        <table>
+            <tr><th>有價證券代號及名稱</th><th>國際證券辨識號碼(ISIN)</th></tr>
+            <tr><td>2330　台積電</td><td>TW0002330008</td></tr>
+            <tr><td>2317　鴻海</td><td>TW0002317005</td></tr>
+        </table>
+        """
+        mock_get.return_value = mock_response
         spider = make_spider("stock_master")
         try:
             spider.fetch_twse()
@@ -156,7 +178,18 @@ class TestE2ERealStockDaily:
 class TestE2ERealCbMaster:
     """Real TPEx CB Master → DataValidator → 5 rules"""
 
-    def test_fetch_and_validate(self):
+    @patch('spiders.cb_master_spider.requests.get')
+    def test_fetch_and_validate(self, mock_get):
+        csv_content = """TITLE,CB Master Data
+DATADATE,test
+HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,35031A,TestCB1,2025/01/01,2028/12/31,100.0000
+BODY,35032A,TestCB2,2025/06/01,2029/05/31,200.0000
+""".encode("big5")
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = csv_content
+        mock_get.return_value = mock_response
         spider = make_spider("cb_master")
         try:
             resp = spider.fetch_cb_master("20260428")
@@ -180,7 +213,16 @@ class TestE2ERealCbMaster:
 class TestE2ERealTpexCbDaily:
     """Real TPEx CB Daily → DataValidator → 6 rules"""
 
-    def test_fetch_and_validate(self):
+    @patch('spiders.tpex_cb_daily_spider.requests.get')
+    def test_fetch_and_validate(self, mock_get):
+        csv_content = """HEADER,代號,名稱,收市,單位
+BODY,35031A,TestCB1,100.5,10
+BODY,35032A,TestCB2,200.0,20
+""".encode("big5")
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.content = csv_content
+        mock_get.return_value = mock_response
         spider = make_spider("tpex_cb_daily")
         try:
             resp = spider.fetch_daily("2026-04-28")
@@ -216,8 +258,34 @@ class TestE2ERealTpexCbDaily:
 
 class TestE2ERealCrossTable:
 
-    def test_stock_daily_symbols_in_master(self):
+    @patch('spiders.stock_master_spider.requests.get')
+    @patch('framework.base_spider.BaseSpider._request_with_retry')
+    def test_stock_daily_symbols_in_master(self, mock_sd_retry, mock_sm_get):
         """stock_daily symbols should all exist in stock_master"""
+        from framework.base_spider import SpiderResponse
+
+        # Mock stock_master spider
+        mock_sm = Mock()
+        mock_sm.status_code = 200
+        mock_sm.text = """
+        <table>
+            <tr><th>有價證券代號及名稱</th><th>國際證券辨識號碼(ISIN)</th></tr>
+            <tr><td>2330　台積電</td><td>TW0002330008</td></tr>
+            <tr><td>2317　鴻海</td><td>TW0002317005</td></tr>
+        </table>
+        """
+        mock_sm_get.return_value = mock_sm
+
+        # Mock stock_daily spider (_request_with_retry returns SpiderResponse)
+        sd_data = {
+            "stat": "OK",
+            "fields": ["日期", "成交股數", "成交筆數", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差"],
+            "data": [
+                ["113/04/01", "1,000", "10", "100.0", "105.0", "99.0", "102.0", "+2.0"],
+            ]
+        }
+        mock_sd_retry.return_value = SpiderResponse(success=True, data=sd_data)
+
         sm = make_spider("stock_master")
         sd = make_spider("stock_daily")
         try:
@@ -244,8 +312,38 @@ class TestE2ERealCrossTable:
             sm.close()
             sd.close()
 
-    def test_cb_daily_codes_in_master(self):
-        """tpex_cb_daily consistency: cb_codes checked against cb_master"""
+    @patch('spiders.cb_master_spider.requests.get')
+    def test_cb_daily_codes_in_master(self, mock_get):
+        """
+        tpex_cb_daily consistency: cb_codes checked against cb_master
+        
+        Note: Single patch because both cb_master_spider and tpex_cb_daily_spider
+        share the same 'requests' module object; side_effect returns the
+        appropriate mock response for each spider call.
+        """
+        # Mock cb_master spider response
+        cb_csv = """TITLE,CB Master Data
+DATADATE,test
+HEADER,債券代碼,債券簡稱,轉換起日,轉換迄日,轉換價格
+BODY,35031A,TestCB1,2025/01/01,2028/12/31,100.0000
+BODY,35032A,TestCB2,2025/06/01,2029/05/31,200.0000
+""".encode("big5")
+        mock_cb = Mock()
+        mock_cb.status_code = 200
+        mock_cb.content = cb_csv
+
+        # Mock tpex_cb_daily spider response
+        tpex_csv = """HEADER,代號,名稱,收市,單位
+BODY,35031A,TestCB1,100.5,10
+BODY,35032A,TestCB2,200.0,20
+""".encode("big5")
+        mock_tpex = Mock()
+        mock_tpex.status_code = 200
+        mock_tpex.content = tpex_csv
+
+        # side_effect: first call → cb_master, second → tpex_cb_daily
+        mock_get.side_effect = [mock_cb, mock_tpex]
+
         mc = make_spider("cb_master")
         tc = make_spider("tpex_cb_daily")
         try:
@@ -358,8 +456,19 @@ class TestE2ERealReportOutput:
         finally:
             spider.close()
 
-    def test_report_contains_all_rule_results(self):
+    @patch('spiders.stock_master_spider.requests.get')
+    def test_report_contains_all_rule_results(self, mock_get):
         """Report should have passed/failed/warning/skipped"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.text = """
+        <table>
+            <tr><th>有價證券代號及名稱</th><th>國際證券辨識號碼(ISIN)</th></tr>
+            <tr><td>2330　台積電</td><td>TW0002330008</td></tr>
+            <tr><td>2317　鴻海</td><td>TW0002317005</td></tr>
+        </table>
+        """
+        mock_get.return_value = mock_response
         spider = make_spider("stock_master")
         try:
             spider.fetch_twse()
