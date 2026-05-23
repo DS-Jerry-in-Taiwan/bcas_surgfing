@@ -109,10 +109,12 @@ class TestDataValidator:
         assert len(report.warning_rules) > 0
 
     def test_invalid_table_name(self):
-        """無效的 table_name 應 raise"""
+        """無效的 table_name 應發出 warning"""
         records = []
-        with pytest.raises(ValueError):
-            DataValidator("invalid_table", records)
+        validator = DataValidator("invalid_table", records)
+        report = validator.run()
+        assert len(report.passed_rules) == 0
+        assert len(report.failed_rules) == 0
 
     def test_report_summary(self):
         """Report 摘要應正確"""

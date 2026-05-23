@@ -10,6 +10,8 @@ sys.path.insert(0, "src")
 
 from framework.base_spider import BaseSpider, SpiderResponse
 
+import requests
+
 
 class TestSpiderResponse:
     """SpiderResponse 测试"""
@@ -255,3 +257,116 @@ class TestBaseSpider:
         assert "thread_count=2" in repr_str
         assert "proxy_enable=True" in repr_str
         assert "requests=5" in repr_str
+
+
+class TestRetryMechanism:
+    """BaseSpider Retry 機制測試"""
+
+    def test_default_retry_params(self):
+        """預設 retry 參數"""
+        spider = BaseSpider()
+        assert spider.max_retries == 3
+        assert spider.retry_delay == 1.0
+        assert spider.retry_backoff == 2.0
+
+    def test_custom_retry_params(self):
+        """自訂 retry 參數"""
+        spider = BaseSpider(max_retries=5, retry_delay=2.0, retry_backoff=1.5)
+        assert spider.max_retries == 5
+        assert spider.retry_delay == 2.0
+        assert spider.retry_backoff == 1.5
+
+    def test_should_retry_on_failure(self):
+        """失敗時 _should_retry 回傳 True"""
+        spider = BaseSpider(max_retries=3)
+        resp = SpiderResponse(success=False, error="timeout")
+        assert spider._should_retry(resp, 1) is True
+        assert spider._should_retry(resp, 2) is True
+
+    def test_should_not_retry_on_success(self):
+        """成功時 _should_retry 回傳 False"""
+        spider = BaseSpider()
+        resp = SpiderResponse(success=True, data={"ok": True})
+        assert spider._should_retry(resp, 1) is False
+
+    def test_should_not_retry_exhausted(self):
+        """嘗試次數耗盡時 _should_retry 回傳 False"""
+        spider = BaseSpider(max_retries=3)
+        resp = SpiderResponse(success=False, error="timeout")
+        assert spider._should_retry(resp, 3) is False  # attempt=3, max=3 → False
+
+    @patch('framework.base_spider.requests.request')
+    def test_request_with_retry_success(self, mock_request):
+        """請求一次成功"""
+        spider = BaseSpider(max_retries=3)
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://example.com"
+        mock_response.json.return_value = {"key": "value"}
+        mock_request.return_value = mock_response
+
+        result = spider._request_with_retry("https://example.com")
+
+        assert result.success is True
+        assert result.data == {"key": "value"}
+        assert mock_request.call_count == 1
+
+    @patch('framework.base_spider.requests.request')
+    def test_request_with_retry_retry_then_succeed(self, mock_request):
+        """前 2 次失敗，第 3 次成功"""
+        spider = BaseSpider(max_retries=3, retry_delay=0.01)  # 快速重試
+
+        # 前 2 次 raise 例外，第 3 次成功
+        mock_request.side_effect = [
+            requests.exceptions.ConnectionError("timeout"),
+            requests.exceptions.ConnectionError("timeout"),
+            Mock(status_code=200, url="https://example.com", json=lambda: {"ok": True}),
+        ]
+
+        result = spider._request_with_retry("https://example.com")
+
+        assert result.success is True
+        assert result.data == {"ok": True}
+        assert mock_request.call_count == 3
+
+    @patch('framework.base_spider.requests.request')
+    def test_request_with_retry_all_fail(self, mock_request):
+        """全部失敗"""
+        spider = BaseSpider(max_retries=3, retry_delay=0.01)
+
+        mock_request.side_effect = requests.exceptions.ConnectionError("network down")
+
+        result = spider._request_with_retry("https://example.com")
+
+        assert result.success is False
+        assert "network down" in result.error or "All 3 attempts failed" in result.error
+        assert mock_request.call_count == 3
+
+    @patch('framework.base_spider.requests.request')
+    def test_request_with_retry_zero_max_retries(self, mock_request):
+        """max_retries=0 時不重試"""
+        spider = BaseSpider(max_retries=0)
+
+        result = spider._request_with_retry("https://example.com")
+
+        # max_retries=0 → for loop 不執行 → 直接回傳 failure
+        assert result.success is False
+        assert mock_request.call_count == 0
+
+    @patch('framework.base_spider.requests.request')
+    def test_request_with_retry_http_error(self, mock_request):
+        """HTTP 500 錯誤應重試"""
+        spider = BaseSpider(max_retries=3, retry_delay=0.01)
+
+        # HTTP 500 (raise_for_status 會拋出)
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.url = "https://example.com"
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("500 Server Error")
+
+        mock_request.return_value = mock_response
+
+        result = spider._request_with_retry("https://example.com")
+
+        assert result.success is False
+        assert mock_request.call_count == 3

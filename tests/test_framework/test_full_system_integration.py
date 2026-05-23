@@ -180,10 +180,11 @@ class TestFullPipelineFlow:
 
         daily_spider = StockDailySpider(pipeline=pipeline)
         daily_mock = Mock(status_code=200)
+        daily_mock.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         daily_mock.json.return_value = TWSE_DAILY_JSON
         daily_mock.raise_for_status = Mock()
 
-        with patch('requests.get', return_value=daily_mock):
+        with patch('framework.base_spider.requests.request', return_value=daily_mock):
             for symbol in symbols:
                 result = daily_spider.fetch_daily(symbol, 2024, 1)
                 assert result.success is True
@@ -238,10 +239,11 @@ class TestFullPipelineFlow:
         pipeline = MemoryPipeline()
         spider = StockDailySpider(pipeline=pipeline)
         mock_resp = Mock(status_code=200)
+        mock_resp.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         mock_resp.json.return_value = {"stat": "OK", "fields": [], "data": []}
         mock_resp.raise_for_status = Mock()
 
-        with patch('requests.get', return_value=mock_resp):
+        with patch('framework.base_spider.requests.request', return_value=mock_resp):
             result = spider.fetch_daily("2330", 2024, 1)
             assert result.success is True
             assert result.data["count"] == 0
@@ -382,10 +384,11 @@ class TestDeduplicationLogic:
         spider = StockDailySpider(pipeline=pipeline)
 
         mock_resp = Mock(status_code=200)
+        mock_resp.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         mock_resp.json.return_value = TWSE_DAILY_JSON
         mock_resp.raise_for_status = Mock()
 
-        with patch('requests.get', return_value=mock_resp):
+        with patch('framework.base_spider.requests.request', return_value=mock_resp):
             r1 = spider.fetch_daily("2330", 2024, 1)
             assert r1.success is True
             r2 = spider.fetch_daily("2330", 2024, 1)
@@ -418,15 +421,16 @@ class TestErrorRecovery:
         """測試網路超時重試機制"""
         spider = StockDailySpider(pipeline=self.pipeline)
 
-        with patch('requests.get', side_effect=requests.exceptions.Timeout("Connection timeout")):
+        with patch('framework.base_spider.requests.request', side_effect=requests.exceptions.Timeout("Connection timeout")):
             result = spider.fetch_daily("2330", 2024, 1)
             assert result.success is False
 
-        with patch('requests.get') as mock_get:
+        with patch('framework.base_spider.requests.request') as mock_request:
             mock_response = Mock()
             mock_response.status_code = 200
+            mock_response.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
             mock_response.json.return_value = TWSE_DAILY_JSON
-            mock_get.return_value = mock_response
+            mock_request.return_value = mock_response
 
             result2 = spider.fetch_daily("2330", 2024, 1)
             assert result2.success is True
@@ -442,7 +446,7 @@ class TestErrorRecovery:
         """完整調用測試: requests.get 拋 timeout → spider 正確處理"""
         spider = StockDailySpider(pipeline=MemoryPipeline())
 
-        with patch('requests.get', side_effect=requests.exceptions.Timeout("timeout")):
+        with patch('framework.base_spider.requests.request', side_effect=requests.exceptions.Timeout("timeout")):
             result = spider.fetch_daily("2330", 2024, 1)
             assert result.success is False
 
@@ -450,10 +454,11 @@ class TestErrorRecovery:
         """完整調用測試: API 回傳錯誤 stat → spider 正確回報失敗"""
         spider = StockDailySpider(pipeline=MemoryPipeline())
         mock_resp = Mock(status_code=200)
+        mock_resp.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         mock_resp.json.return_value = {"stat": "ERROR", "message": "rate limit"}
         mock_resp.raise_for_status = Mock()
 
-        with patch('requests.get', return_value=mock_resp):
+        with patch('framework.base_spider.requests.request', return_value=mock_resp):
             result = spider.fetch_daily("2330", 2024, 1)
             assert result.success is False
 

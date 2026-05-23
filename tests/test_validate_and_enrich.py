@@ -11,10 +11,10 @@ TEST_MASTER = "data/clean/master.csv"
 def setup_env(master_ids, daily_rows):
     os.makedirs("data/clean/daily", exist_ok=True)
     with open(TEST_MASTER, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["代號", "名稱"])
+        writer = csv.DictWriter(f, fieldnames=["symbol", "名稱"])
         writer.writeheader()
         for mid in master_ids:
-            writer.writerow({"代號": mid, "名稱": f"Name{mid}"})
+            writer.writerow({"symbol": mid, "名稱": f"Name{mid}"})
     with open(TEST_DAILY, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["代號", "數值"])
         writer.writeheader()
@@ -33,7 +33,12 @@ def test_enrich_ok_and_notfound():
         {"代號": "A123", "數值": "10"},
         {"代號": "X999", "數值": "20"},
     ])
-    validate_and_enrich.validate_and_enrich()
+    validate_and_enrich.validate_and_enrich(
+        daily_dir="data/clean/daily",
+        out_dir="data/clean/daily",
+        stock_master_path="data/clean/master.csv",
+        cb_master_glob=""
+    )
     with open(TEST_DAILY, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
         assert rows[0]["master_check"] == "OK"

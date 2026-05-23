@@ -337,6 +337,15 @@ class TestBatchConcurrency:
         )
         assert batch.max_retries == 3
 
+    def test_max_retries_passed_to_spider(self):
+        """確認 BatchSpider 的 max_retries 傳遞給 spider 實例"""
+        batch = BatchSpider(
+            spider_class=StockDailySpider,
+            max_retries=5
+        )
+        spider = batch._get_spider()
+        assert spider.max_retries == 5
+
 
 class TestBatchSpiderIntegration:
     """批次爬蟲整合測試"""
@@ -355,17 +364,19 @@ class TestBatchSpiderIntegration:
         if os.path.exists(self.temp_file.name):
             os.unlink(self.temp_file.name)
     
-    @patch('spiders.stock_daily_spider.requests.get')
-    def test_backfill_mock(self, mock_get):
+    @patch('framework.base_spider.requests.request')
+    def test_backfill_mock(self, mock_request):
         """測試批次補檔 - Mock"""
         mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.url = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         mock_response.json.return_value = {
             "stat": "OK",
             "fields": ["日期", "成交股數", "成交金額", "開盤價", "最高價", "最低價", "收盤價", "漲跌價差", "成交筆數"],
             "data": [["113/01/15", "5,234,567", "125,678,901", "100", "105", "99", "103", "+3", "1,234"]]
         }
         mock_response.raise_for_status = Mock()
-        mock_get.return_value = mock_response
+        mock_request.return_value = mock_response
         
         batch = BatchSpider(
             spider_class=StockDailySpider,

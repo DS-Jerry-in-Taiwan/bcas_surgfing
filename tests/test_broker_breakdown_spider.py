@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, PropertyMock
 from src.spiders.broker_breakdown_spider import BrokerBreakdownSpider
 from src.spiders.bsr_client import (
     BsrConnectionError,
@@ -276,3 +276,85 @@ class TestBrokerBreakdownSpiderCollectOnly:
         assert spider.pipeline is None
 
         spider.fetch_broker_breakdown("20260509", "2330")
+
+
+class TestFetchBatch:
+    """批次查詢測試"""
+
+    @patch("src.spiders.broker_breakdown_spider.BrokerBreakdownSpider.bsr_client", new_callable=PropertyMock)
+    def test_fetch_batch_single_symbol(self, mock_bsr_prop):
+        """批次查詢 1 支股票"""
+        mock_client = MagicMock()
+        mock_client.fetch_broker_data.return_value = SAMPLE_BSR_DATA
+        mock_client._cb_state = "CLOSED"
+        mock_bsr_prop.return_value = mock_client
+
+        spider = BrokerBreakdownSpider()
+        result = spider.fetch_broker_breakdown_batch("20260509", ["2330"])
+
+        assert result.success is True
+        assert result.data["count"] > 0
+        assert len(result.data["success_symbols"]) == 1
+        assert len(result.data["failed_symbols"]) == 0
+
+    @patch("src.spiders.broker_breakdown_spider.BrokerBreakdownSpider.bsr_client", new_callable=PropertyMock)
+    def test_fetch_batch_multiple_symbols(self, mock_bsr_prop):
+        """批次查詢 3 支股票全部成功"""
+        mock_client = MagicMock()
+        mock_client.fetch_broker_data.return_value = SAMPLE_BSR_DATA
+        mock_client._cb_state = "CLOSED"
+        mock_bsr_prop.return_value = mock_client
+
+        spider = BrokerBreakdownSpider()
+        result = spider.fetch_broker_breakdown_batch("20260509", ["2330", "2317", "2303"])
+
+        assert result.success is True
+        assert len(result.data["success_symbols"]) == 3
+        assert len(result.data["failed_symbols"]) == 0
+
+    @patch("src.spiders.broker_breakdown_spider.BrokerBreakdownSpider.bsr_client", new_callable=PropertyMock)
+    def test_fetch_batch_partial_failure(self, mock_bsr_prop):
+        """部分失敗不影響其他股票"""
+        mock_client = MagicMock()
+        mock_client.fetch_broker_data.side_effect = [
+            SAMPLE_BSR_DATA,
+            BsrConnectionError("Network timeout"),
+            SAMPLE_BSR_DATA,
+        ]
+        mock_client._cb_state = "CLOSED"
+        mock_bsr_prop.return_value = mock_client
+
+        spider = BrokerBreakdownSpider()
+        result = spider.fetch_broker_breakdown_batch("20260509", ["2330", "2317", "2303"])
+
+        assert result.success is True  # 至少 1 支成功
+        assert len(result.data["success_symbols"]) == 2
+        assert len(result.data["failed_symbols"]) == 1
+
+    @patch("src.spiders.broker_breakdown_spider.BrokerBreakdownSpider.bsr_client", new_callable=PropertyMock)
+    def test_fetch_batch_circuit_breaker_stops(self, mock_bsr_prop):
+        """circuit breaker 開啟時停止批次"""
+        mock_client = MagicMock()
+
+        # 用 function 作為 side_effect 以同時控制 _cb_state 和拋出異常
+        call_count: list = [0]
+
+        def side_effect(symbol):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return SAMPLE_BSR_DATA  # 2330 成功
+            else:
+                mock_client._cb_state = "OPEN"
+                raise BsrConnectionError("error")
+
+        mock_client.fetch_broker_data.side_effect = side_effect
+        mock_client._cb_state = "CLOSED"
+        mock_bsr_prop.return_value = mock_client
+
+        spider = BrokerBreakdownSpider()
+        result = spider.fetch_broker_breakdown_batch("20260509", ["2330", "2317", "2303"])
+
+        # 2330 成功，2317 失敗後 circuit breaker 開啟 → 停止，2303 被跳過
+        assert "2330" in result.data["success_symbols"]
+        assert len(result.data["success_symbols"]) == 1
+        assert "2303" not in result.data["success_symbols"]  # 被 circuit breaker 擋住

@@ -9,7 +9,7 @@ from etl import validate_and_enrich
 
 TEST_DAILY_DIR = "data/test_clean/daily"
 TEST_CB_MASTER_DIR = "data/test_raw/master"
-TEST_DAILY = os.path.join(TEST_DAILY_DIR, "test_cb.csv")
+TEST_DAILY = os.path.join(TEST_DAILY_DIR, "test_cb_20240101.csv")
 TEST_CB_MASTER = os.path.join(TEST_CB_MASTER_DIR, "cb_list_test.csv")
 
 def setup_env(cb_rows, daily_rows):
@@ -27,8 +27,13 @@ def setup_env(cb_rows, daily_rows):
             writer.writerow(row)
 
 def cleanup():
+    # 清除新版檔名
     if os.path.exists(TEST_DAILY):
         os.remove(TEST_DAILY)
+    # 清除舊版檔名（無日期模式）
+    old_style = os.path.join(TEST_DAILY_DIR, "test_cb.csv")
+    if os.path.exists(old_style):
+        os.remove(old_style)
     if os.path.exists(TEST_CB_MASTER):
         os.remove(TEST_CB_MASTER)
     cb_glob = os.path.join(TEST_CB_MASTER_DIR, "cb_list_*.csv")
@@ -53,17 +58,18 @@ def test_enrich_cb_fields():
     os.rename(TEST_CB_MASTER, cb_master_real)
     validate_and_enrich.validate_and_enrich(
         daily_dir=TEST_DAILY_DIR,
+        out_dir=TEST_DAILY_DIR,
         cb_master_glob=os.path.join(TEST_CB_MASTER_DIR, "cb_list_*.csv"),
         stock_master_path="data/test_raw/master/stock_list.csv"  # dummy, not used in this test
     )
     with open(TEST_DAILY, encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
         assert rows[0]["master_check"] == "OK"
-        assert rows[0]["master_債券簡稱"] == "可轉債A"
-        assert rows[0]["master_轉換價格"] == "100.5"
+        assert rows[0]["債券簡稱"] == "可轉債A"
+        assert rows[0]["轉換價格"] == "100.5"
         assert rows[1]["master_check"] == "OK"
-        assert rows[1]["master_債券簡稱"] == "可轉債B"
-        assert rows[1]["master_轉換價格"] == "200.0"
+        assert rows[1]["債券簡稱"] == "可轉債B"
+        assert rows[1]["轉換價格"] == "200.0"
         assert rows[2]["master_check"] == "NOT_FOUND"
     print("test_enrich_cb_fields: PASS")
     # 清理

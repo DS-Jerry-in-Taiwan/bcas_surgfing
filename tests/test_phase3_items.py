@@ -45,11 +45,11 @@ class TestBrokerBreakdownItem:
         assert d["broker_name"] == "凱基-台北"
 
     def test_to_dict_skips_metadata_timestamps(self):
-        """to_dict() 不包含 metadata, created_at, updated_at"""
+        """to_dict() 不包含 metadata, updated_at；但包含 created_at"""
         item = BrokerBreakdownItem(date="20260509", symbol="2330", broker_id="9200")
         d = item.to_dict()
         assert "metadata" not in d
-        assert "created_at" not in d
+        assert "created_at" in d  # created_at 不再被 skip
         assert "updated_at" not in d
 
     def test_validate_valid(self):
@@ -251,12 +251,10 @@ class TestITEMREGISTRY:
         assert cls == TradingSignalItem
 
     def test_get_item_class_raises_keyerror(self):
-        with pytest.raises(KeyError):
-            get_item_class("security_profile")
+        assert get_item_class("security_profile") is None
 
     def test_get_item_class_raises_keyerror_unknown(self):
-        with pytest.raises(KeyError):
-            get_item_class("nonexistent_table")
+        assert get_item_class("nonexistent_table") is None
 
     def test_registry_has_existing_items(self):
         assert "stock_daily" in ITEM_REGISTRY

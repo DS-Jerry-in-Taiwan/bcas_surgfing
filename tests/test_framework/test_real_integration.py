@@ -148,8 +148,8 @@ class TestRealHttpAndDbIntegration:
         rows = cur.fetchall()
         cur.close()
         assert len(rows) == 2
-        assert rows[0] == ("35031A", "")
-        assert rows[1] == ("35032B", "")
+        assert rows[0] == ("35031A", "3503")  # underlying_stock 由 __post_init__ 從 cb_code[:4] 推導
+        assert rows[1] == ("35032B", "3503")
 
     def test_tpex_cb_daily_http_and_db(self, httpserver, db):
         httpserver.expect_request(re.compile(r"/tpex_cb_daily/.*"), method="GET").respond_with_data(TPEX_CB_DAILY_CSV, content_type="text/csv")

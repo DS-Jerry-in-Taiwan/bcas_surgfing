@@ -19,9 +19,9 @@ CB_CLOSE = 120.0
 CONV_PRICE = 100.0
 STOCK_CLOSE = 150.0
 
-# 預期: 轉換價值 = (120/100) * 1000 * 150 = 180000.0
-EXPECTED_CONV_VALUE = (CB_CLOSE / CONV_PRICE) * 1000 * STOCK_CLOSE
-# 預期: 溢價率 = (120/180000) - 1 = -0.999333...
+# 預期: 轉換價值 (百元報價) = (100/100) * 150 = 150.0
+EXPECTED_CONV_VALUE = (100.0 / CONV_PRICE) * STOCK_CLOSE
+# 預期: 溢價率 = (120/150) - 1 = -0.2
 EXPECTED_PREMIUM = (CB_CLOSE / EXPECTED_CONV_VALUE) - 1
 
 
@@ -32,48 +32,40 @@ class TestCalculateConversionValue:
     """轉換價值計算測試"""
 
     def test_normal_case(self):
-        """正常情況: (120/100)*1000*150 = 180000.0"""
+        """正常情況: (100/100)*150 = 150.0"""
         result = PremiumCalculator.calculate_conversion_value(
-            CB_CLOSE, CONV_PRICE, STOCK_CLOSE
+            CONV_PRICE, STOCK_CLOSE
         )
-        assert result == pytest.approx(180000.0, rel=1e-9)
+        assert result == pytest.approx(150.0, rel=1e-9)
         assert result == EXPECTED_CONV_VALUE
 
     def test_zero_conversion_price(self):
         """轉換價格為 0 時回傳 0.0 不拋錯"""
         result = PremiumCalculator.calculate_conversion_value(
-            CB_CLOSE, 0.0, STOCK_CLOSE
+            0.0, STOCK_CLOSE
         )
         assert result == 0.0
 
     def test_negative_conversion_price(self):
         """轉換價格為負值時回傳 0.0"""
         result = PremiumCalculator.calculate_conversion_value(
-            CB_CLOSE, -10.0, STOCK_CLOSE
-        )
-        assert result == 0.0
-
-    def test_zero_cb_close(self):
-        """CB 收盤價為 0: (0/100)*1000*150 = 0.0"""
-        result = PremiumCalculator.calculate_conversion_value(
-            0.0, CONV_PRICE, STOCK_CLOSE
+            -10.0, STOCK_CLOSE
         )
         assert result == 0.0
 
     def test_zero_stock_close(self):
-        """現股收盤價為 0: (120/100)*1000*0 = 0.0"""
+        """現股收盤價為 0: (100/100)*0 = 0.0"""
         result = PremiumCalculator.calculate_conversion_value(
-            CB_CLOSE, CONV_PRICE, 0.0
+            CONV_PRICE, 0.0
         )
         assert result == 0.0
 
     def test_large_values(self):
-        """大數值測試，確保不溢位"""
+        """大數值測試: (100/50)*1000 = 2000.0"""
         result = PremiumCalculator.calculate_conversion_value(
-            500.0, 50.0, 1000.0
+            50.0, 1000.0
         )
-        # (500/50) * 1000 * 1000 = 10000000.0
-        assert result == pytest.approx(10_000_000.0, rel=1e-9)
+        assert result == pytest.approx(2000.0, rel=1e-9)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -190,10 +182,11 @@ class TestAnalyze:
         assert r.date == "2026-05-11"
         assert r.symbol == "2330"
         assert r.close_price == 150.0
-        assert r.conversion_value == pytest.approx(180000.0, rel=1e-9)
+        # 新公式: conv_value = (100/100)*150 = 150.0
+        assert r.conversion_value == pytest.approx(150.0, rel=1e-9)
         # premium_ratio is rounded to 4 decimal places in analyze()
         assert r.premium_ratio == pytest.approx(round(EXPECTED_PREMIUM, 4), rel=1e-9)
-        assert r.is_junk is False  # premium_ratio is negative
+        assert r.is_junk is False  # premium_ratio is -0.2 (負溢價 = 折價)
         assert r.technical_signal == "NEUTRAL"
 
         # Verify DB operations
@@ -266,7 +259,7 @@ class TestAnalyze:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
-        # CB close 遠高於 stock close → 溢價
+        # CB close 遠高於 stock close → 高溢價
         mock_cursor.fetchall.return_value = [
             ("CB01", 1000.0, 100.0, "2330", 0.05),
         ]
@@ -282,11 +275,11 @@ class TestAnalyze:
 
         assert len(results) == 1
         r = results[0]
-        # conv_value = (1000/100)*1000*10 = 100000
-        # premium_ratio = (1000/100000) - 1 = -0.99 (discount)
-        # Actually: CB=1000, conversion_value=((1000/100)*1000*10)=100000
-        # premium = 1000/100000 - 1 = 0.01 - 1 = -0.99
-        assert r.is_junk is False  # negative premium
+        # 新公式: conv_value = (100/100)*10 = 10.0
+        # premium_ratio = (1000/10) - 1 = 99.0 (9900%, 高溢價)
+        assert r.conversion_value == pytest.approx(10.0, rel=1e-9)
+        assert r.premium_ratio == pytest.approx(round(99.0, 4), rel=1e-9)
+        assert r.is_junk is True  # 99.0 > 0.05
 
     @patch("src.analytics.premium_calculator.psycopg2")
     def test_multiple_symbols(self, mock_psycopg2):
@@ -335,10 +328,10 @@ class TestSaveResults:
 
         results = [
             AnalysisResult(date="2026-05-11", symbol="2330",
-                           close_price=150.0, conversion_value=180000.0,
-                           premium_ratio=-0.000333, is_junk=False),
+                           close_price=150.0, conversion_value=150.0,
+                           premium_ratio=-0.2, is_junk=False),
             AnalysisResult(date="2026-05-11", symbol="2303",
-                           close_price=50.0, conversion_value=25000.0,
+                           close_price=50.0, conversion_value=62.5,
                            premium_ratio=0.03, is_junk=False),
         ]
 
