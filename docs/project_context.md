@@ -1,6 +1,6 @@
 # BCAS Quant 專案上下文摘要
 
-> 最後更新: 2026-05-15
+> 最後更新: 2026-05-16 (Phase 13 — E2E Full Pipeline 測試規劃完成)
 > 用途: 新 session 啟動時讀取此文件，快速掌握專案狀態
 
 ---
@@ -11,7 +11,7 @@ BCAS Quant 是一個 CBAS 盤後自動化分析系統 (EOD Analytics System)。
 每日台股收盤後自動啟動，蒐集現股與可轉債 (CB) 報價及籌碼數據，
 計算溢價率與隔日沖風險，產出次日交易戰略清單。
 
-- **版本**: 3.2.0
+- **版本**: 3.3.0 (v3 E2E 驗證通過)
 - **語言**: Python (7,160+ 行) + Go (scheduler)
 - **資料庫**: PostgreSQL 14 (Docker)
 - **部署**: Docker Compose (postgres + pipeline + scheduler)
@@ -81,7 +81,13 @@ bcas_quant/
 │   │   ├── phase4/                BrokerBreakdown 替代方案調查
 │   │   ├── phase5/                BSR + ddddocr 整合規劃 (已完成)
 │   │   ├── phase6/                E2E 整合驗證
-│   │   └── phase7/                分析鏈修復 (enrichment)
+│   │   ├── phase7/                分析鏈修復 (enrichment)
+│   │   ├── phase8/                PremiumCalculator 公式修正
+│   │   ├── phase9/                BaseSpider Retry 機制
+│   │   ├── phase10/               StockDaily & BrokerBreakdown 擴充
+│   │   ├── phase11/               DataCleaner DB Migration
+│   │   ├── phase12/               Symbol Registry + __post_init__
+│   │   └── phase13/               E2E 全流程整合測試規劃
 │   └── project_context.md         本文件
 └── scripts/
     └── start_eod.sh              EOD 啟動腳本
@@ -148,7 +154,7 @@ python src/run_eod_analysis.py --stage 4   # 報表
 
 ---
 
-## 四、Phase 5 & 6 & 7 完成狀態
+## 四、Phase 5 & 6 & 7 及 v3 E2E 驗證狀態
 
 ### Phase 5 — BSR + ddddocr 整合 ✅ 已完成
 
@@ -218,20 +224,79 @@ BSR 網站客戶端 + ddddocr OCR 解決券商分點買賣超資料源問題。
 | PremiumCalculator + TechnicalAnalyzer | 58 | ✅ |
 | Phase 3 報表 + Pipeline | 21 | ✅ |
 | Phase 3 Items + 整合 | 57 | ✅ |
-| **核心邏輯 (phase5 + 回歸)** | **295** | **✅ 零回歸** |
+| **核心邏輯 (phase5 + 回歸)** | **651/665** | **✅ (14 預先存在的支架測試失敗)** |
 
 ---
 
-## 五、待修項目 (Phase 3 設計缺口)
+## 📌 Phase 8~12 已完成功能
 
-以下問題在 Phase 6 E2E 驗證中被發現，屬於 Phase 3 架構設計時遺留的缺口，
-**不是** Phase 5 或 Phase 6 的範圍。
+### Phase 8 — PremiumCalculator 公式修正 (V3-01) ✅
+- `conversion_value` 公式修正: `(100 / conversion_price) * stock_close`
+- 移除錯誤的 `cb_close` 參數
+- 24 tests passed
+
+### Phase 9 — BaseSpider Retry 機制 (V3-03) ✅
+- 指數退避重試 (1s → 2s → 4s, max 3 retries)
+- 所有 6 個 spider 皆已加入 retry
+- 647 tests passed
+
+### Phase 10 — StockDaily & BrokerBreakdown 擴充 ✅
+- StockDailySpider 從 `cb_master` 取得 ~202 CB 標的股 (非硬編碼 2330)
+- BrokerBreakdownSpider 支援 batch-fetch 多檔 symbol
+- 非阻斷 batch fetch、5 User-Agent 輪換、隨機延遲
+- 651 tests passed
+
+### Phase 11 — DataCleaner DB Migration (GAP-02) ✅
+- `migration_001_add_cleaner_columns.sql`: 補上 `master_check`, `name`, `industry` 等欄位
+- DataCleaner 啟動時自動執行 pending migration
+- DataCleaner 不再 crash on start
+- 651 tests passed
+
+### Phase 12 — Symbol Registry + CbMasterItem `__post_init__` ✅
+- `tracked_symbols` 表持久化 symbol 清單
+- `CbMasterItem.__post_init__`: `cb_code[:4]` 自動推導 `underlying_stock`
+- `run_daily.py`: `_update_symbol_registry()`, `_get_active_symbols()`
+- StockDaily/BrokerBreakdown 從 Registry 讀取 symbol
+- 651 tests passed (14 pre-existing failures)
+
+---
+
+## 五、待修項目 (Phase 3 設計缺口 + v3 E2E 驗證發現)
+
+### v3 E2E 驗證結論
+
+2026-05-15 完成 **第三版完整端到端驗證**，結果如下：
+
+| 階段 | 結果 | 產出 |
+|:----|:----:|:----|
+| Stage 1: 爬蟲 | ✅ 5 spiders | stock_master=32,076 / cb_master=378 / stock_daily=1,642 / tpex_cb_daily=756 / broker_breakdown=871 |
+| Stage 2: 分析 | ✅ 202 筆 | PremiumCalculator + TechnicalAnalyzer |
+| Stage 3: 風險 | ✅ 163 筆 | RiskAssessor S/A/B/C 評級 |
+| Stage 4: 報表 | ✅ 4,583 chars | Markdown 完整戰略清單 |
+| 非阻斷設計 | ✅ 驗證通過 | CbMasterSpider 失敗不影響後續 |
+| BSR Captcha Retry | ✅ 驗證通過 | 3 次重試後成功 |
+
+**本次驗證中修復的項目**:
+1. **CbMasterSpider CSV** (E2E-001) — 確認 TPEx CSV 格式正常，378 items ✅
+2. **GAP-02 DB migration** — 補上 `master_check`, `name`, `industry` 等欄位
+3. **GAP-03 暫解** — 為 163 檔 CB 標的股 batch-fetch 日行情資料
+
+**本次驗證發現的新問題**:
+1. **V3-01 (🔴 高)** — PremiumCalculator `conversion_value` 公式錯誤
+2. **V3-02 (🟡 中)** — BrokerBreakdownSpider 僅限 2330
+3. **V3-03 (🟢 低)** — BaseSpider 無 Retry 機制
+
+以下為完整問題清單：
 
 | ID | 問題 | 根源 | 影響 | 狀態 |
 |:--:|------|------|------|:----:|
 | GAP-01 | **`cb_master.underlying_stock` 未填入** | Phase 3 加了欄位但沒寫 enrichment | PremiumCalculator 0 筆 → 分析鏈空輸出 | ✅ **已修復** (Phase 7) |
-| GAP-02 | **DataCleaner 的 `master_check` 欄位不存在** | Phase 3 寫了 SQL 但 schema 沒加該欄位 | `step_clean()` 崩潰 | ✅ **已修復** (Phase 7) |
-| GAP-03 | **StockDailySpider 只抓 2330** | Phase 3 設計即為 demo | 僅 1 檔有日行情 | 🟢 低 — 待處理 |
+| GAP-02 | **DataCleaner 的 `master_check`/`name`/`industry` 等欄位不存在於 DB** | Phase 3 寫了 SQL 但 DB migration 未執行 | `step_clean()` 崩潰 | ✅ **已修復** (Phase 11) |
+| GAP-03 | **StockDailySpider 只抓 2330** | Phase 3 設計即為 demo | 僅 1 檔有日行情 → 分析鏈**零產出** | ✅ **已修復** (Phase 10) |
+| E2E-001 | **CbMasterSpider CSV 格式相容性** (Phase 6 時 header(0) vs data(22)) | TPEx 短暫格式變更 | Phase 6 時 items=0 | ✅ **已自動解決** (本次驗證 378 items ✅) |
+| V3-01 | **PremiumCalculator 公式錯誤** | `conversion_value` 錯誤使用了 `cb_close` 而非固定面額 | 溢價率全部 ~-99.9% (公式不正確) | ✅ **已修復** (Phase 8) |
+| V3-02 | **ChipProfiler 只追蹤 2330 券商分點** | BrokerBreakdownSpider 硬編碼 2330 | 所有評級風險佔比 = N/A | ✅ **已修復** (Phase 10) |
+| V3-03 | **無 Retry 機制** (BaseSpider) | 設計遺漏 | TPEx 短暫故障 → 當日資料遺失 | ✅ **已修復** (Phase 9) |
 
 ### 已修復的 GAP-01
 
@@ -266,10 +331,11 @@ from src.run_daily import DB_CONFIG
 # DB_CONFIG = dict(host="localhost", port=5432, database="cbas", user="postgres", password="postgres")
 ```
 
-### 8 張表 (實際存在)
+### 10 張表 (實際存在)
 
-既有 (4張): stock_master, stock_daily, stock_daily (hypertable 已移除), cb_master, tpex_cb_daily
+既有 (4張): stock_master, stock_daily, cb_master, tpex_cb_daily
 Phase 3 (4張): broker_breakdown, daily_analysis_results, trading_signals, broker_blacklist
+Phase 12 (1張): tracked_symbols
 
 ---
 
@@ -299,5 +365,21 @@ python tests/test_bsr_captcha.py --count 10
 | Phase 6 Developer Prompt | `docs/agent_context/phase6/developer_prompt.md` | E2E 驗證執行指引 |
 | Phase 7 任務規劃 | `docs/agent_context/phase7/task_plan.md` | 分析鏈修復 (enrichment) |
 | Phase 7 Developer Prompt | `docs/agent_context/phase7/developer_prompt.md` | 修復執行指引 |
+| Phase 8 任務規劃 | `docs/agent_context/phase8/task_plan.md` | PremiumCalculator 公式修正 (V3-01) |
+| Phase 8 Developer Prompt | `docs/agent_context/phase8/developer_prompt.md` | 公式修正執行指引 |
+| Phase 8 開發日誌 | `docs/agent_context/phase8/development_log.md` | 修正記錄與驗證結果 |
+| Phase 9 任務規劃 | `docs/agent_context/phase9/task_plan.md` | BaseSpider Retry 機制 (V3-03) |
+| Phase 9 Developer Prompt | `docs/agent_context/phase9/developer_prompt.md` | Retry 機制執行指引 |
+| Phase 9 開發日誌 | `docs/agent_context/phase9/development_log.md` | Retry 實作記錄 |
+| Phase 10 任務規劃 | `docs/agent_context/phase10/task_plan.md` | 擴充 StockDaily & BrokerBreakdown (GAP-03+V3-02) |
+| Phase 10 Developer Prompt | `docs/agent_context/phase10/developer_prompt.md` | 擴充執行指引 |
+| Phase 10 開發日誌 | `docs/agent_context/phase10/development_log.md` | 擴充實作記錄 |
+| Phase 11 任務規劃 | `docs/agent_context/phase11/task_plan.md` | DataCleaner DB Migration (GAP-02) |
+| Phase 11 Developer Prompt | `docs/agent_context/phase11/developer_prompt.md` | Migration 執行指引 |
+| Phase 11 開發日誌 | `docs/agent_context/phase11/development_log.md` | Migration 實作記錄 |
+| Phase 12 任務規劃 | `docs/agent_context/phase12/task_plan.md` | Symbol Registry + CbMasterItem `__post_init__` |
+| Phase 12 開發日誌 | `docs/agent_context/phase12/development_log.md` | Symbol Registry 實作記錄 |
+| Phase 13 任務規劃 | `docs/agent_context/phase13/task_plan.md` | E2E 全流程整合測試規劃 |
+| Phase 13 Developer Prompt | `docs/agent_context/phase13/developer_prompt.md` | E2E 測試執行指引 |
 | 優化路線圖 | `docs/OPTIMIZATION_ROADMAP.md` | 效能優化規劃 |
 | 系統架構 | `SYSTEM_ARCHITECTURE.md` | 完整架構文件 |
