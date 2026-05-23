@@ -58,7 +58,7 @@ class BaseItem(ABC):
         Returns:
             包含所有非私有字段的字典
         """
-        skip = {"metadata", "created_at", "updated_at"}
+        skip = {"metadata", "updated_at"}
         result = {}
         for key, value in self.__dict__.items():
             if key.startswith("_"):
@@ -262,6 +262,17 @@ class CbMasterItem(BaseItem):
     def validate(self) -> bool:
         return bool(self.cb_code and self.underlying_stock)
 
+    def __post_init__(self):
+        """從 cb_code 前4碼推導 underlying_stock（標的股票代號）
+
+        DataCleaner 的 enrich_cb_master() 仍會執行校正備援，
+        但 Item 自身在建立時就確保領域規則一致。
+        """
+        if not self.underlying_stock and len(self.cb_code) >= 4:
+            candidate = self.cb_code[:4]
+            if candidate.isdigit():
+                self.underlying_stock = candidate
+
 
 @dataclass
 class BrokerBreakdownItem(BaseItem):
@@ -397,6 +408,6 @@ ITEM_REGISTRY: Dict[str, Type[BaseItem]] = {
 }
 
 
-def get_item_class(table_name: str) -> Type[BaseItem]:
-    """根據表名獲取 Item 類，不存在時拋 KeyError"""
-    return ITEM_REGISTRY[table_name]
+def get_item_class(table_name: str) -> Optional[Type[BaseItem]]:
+    """根據表名獲取 Item 類，不存在時回傳 None"""
+    return ITEM_REGISTRY.get(table_name)

@@ -20,7 +20,7 @@ def find_master_for_daily(daily_date, master_files):
     """
     master_dates = []
     for f in master_files:
-        m = re.search(f'(\d{8})', f)
+        m = re.search(r'(\d{8})', f)
         if m:
             master_dates.append((datetime.strptime(m.group(1), '%Y%m%d'), f))
     master_dates.sort()
