@@ -11,9 +11,12 @@ Usage:
     for item in spider.get_items():
         print(item.to_dict())
 """
+import logging
 from typing import Optional, List, Dict, Any
 from src.framework.base_spider import BaseSpider, SpiderResponse
 from src.framework.base_item import BrokerBreakdownItem
+
+logger = logging.getLogger(__name__)
 from src.spiders.bsr_client import (
     BsrClient,
     BsrConnectionError,
@@ -111,6 +114,60 @@ class BrokerBreakdownSpider(BaseSpider):
                 error=f"BSR 查詢失敗: {e}",
                 url="https://bsr.twse.com.tw/bshtm/",
             )
+
+    def fetch_broker_breakdown_batch(
+        self, date: str, symbols: List[str]
+    ) -> SpiderResponse:
+        """批次查詢多支股票的券商分點買賣超
+
+        非阻斷設計: 個別股票失敗不影響其他股票。
+        BSR 查詢為 I/O bound (captcha + submit)，
+        採循序查詢避免觸發 circuit breaker。
+
+        Args:
+            date: 日期 YYYYMMDD
+            symbols: 股票代號列表
+
+        Returns:
+            SpiderResponse
+        """
+        total_count = 0
+        success_symbols: List[str] = []
+        failed_symbols: List[Dict] = []
+
+        logger.info("Batch fetching broker breakdown for %d symbols", len(symbols))
+
+        for symbol in symbols:
+            resp = self.fetch_broker_breakdown(date, symbol)
+            if resp.success:
+                total_count += resp.data.get("count", 0)
+                success_symbols.append(symbol)
+            else:
+                failed_symbols.append({"symbol": symbol, "error": resp.error})
+                logger.warning("Broker breakdown failed for %s: %s", symbol, resp.error)
+
+            # Circuit breaker 開啟時提前停止
+            if self._bsr_client and self._bsr_client._cb_state == "OPEN":
+                logger.warning("BSR circuit breaker OPEN, stopping batch early")
+                break
+
+        logger.info(
+            "Batch complete: %d/%d success, %d failed, %d items",
+            len(success_symbols), len(symbols),
+            len(failed_symbols), total_count,
+        )
+
+        return SpiderResponse(
+            success=len(success_symbols) > 0,
+            data={
+                "count": total_count,
+                "success_count": len(success_symbols),
+                "failed_count": len(failed_symbols),
+                "success_symbols": success_symbols,
+                "failed_symbols": failed_symbols,
+            },
+            url="https://bsr.twse.com.tw/bshtm/",
+        )
 
     def get_items(self) -> List[BrokerBreakdownItem]:
         """取得本次抓取的分點資料"""

@@ -5,6 +5,7 @@ BSR (Basic Securities Report) 網站客戶端
 from __future__ import annotations
 
 import logging
+import random
 import re
 import time
 from typing import Optional, List, Dict, Any
@@ -38,6 +39,15 @@ class BsrParseError(BsrError):
 
 class BsrCircuitBreakerOpen(BsrError):
     """Circuit Breaker 開啟，拒絕請求"""
+
+
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
 
 
 class BsrClient:
@@ -74,11 +84,7 @@ class BsrClient:
 
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
             "Content-Type": "application/x-www-form-urlencoded",
@@ -602,8 +608,12 @@ class BsrClient:
     # ─── Helpers ─────────────────────────────────────────────────────
 
     def _throttle(self) -> None:
-        """請求間隔控制"""
-        time.sleep(self.request_interval)
+        """請求間隔控制 (隨機延遲，避免固定間隔被偵測)"""
+        delay = random.uniform(
+            self.request_interval * 0.75,
+            self.request_interval * 1.25,
+        )
+        time.sleep(delay)
 
     def close(self) -> None:
         """關閉 session"""

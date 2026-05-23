@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import os
 import random
+import time
 import logging
 from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +56,7 @@ class BaseSpider:
     功能說明:
         - 整合 Proxy 支援
         - 統一 Header 管理
-        - 自定義 Retry 策略
+        - 自動重試機制 (exponential backoff, 可自訂)
         - Agent 回傳介面
     
     Attributes:
@@ -82,6 +85,9 @@ class BaseSpider:
         redis_key: Optional[str] = None,
         proxy_enable: bool = True,
         requests_interval: float = 1.0,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        retry_backoff: float = 2.0,
     ) -> None:
         """
         初始化 BaseSpider
@@ -91,11 +97,17 @@ class BaseSpider:
             redis_key: Redis 鍵（分布式用）
             proxy_enable: 是否啟用 Proxy
             requests_interval: 請求間隔（秒）
+            max_retries: 最大重試次數
+            retry_delay: 重試延遲（秒）
+            retry_backoff: 重試退避倍數
         """
         self.thread_count = thread_count
         self.redis_key = redis_key
         self.proxy_enable = proxy_enable
         self.requests_interval = requests_interval
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.retry_backoff = retry_backoff
         
         # Header 配置
         self.headers = self.DEFAULT_HEADERS.copy()
@@ -114,7 +126,8 @@ class BaseSpider:
         
         logger.info(
             f"BaseSpider initialized: thread={thread_count}, "
-            f"proxy_enable={proxy_enable}, interval={requests_interval}s"
+            f"proxy_enable={proxy_enable}, interval={requests_interval}s, "
+            f"max_retries={max_retries}, retry_delay={retry_delay}, retry_backoff={retry_backoff}"
         )
     
     def _load_custom_headers(self) -> None:
@@ -273,6 +286,92 @@ class BaseSpider:
         request_kwargs.update(kwargs)
         return request_kwargs
     
+    def _should_retry(self, response: SpiderResponse, attempt: int) -> bool:
+        """判斷是否應該重試。子類可 override 自定義條件。
+
+        Args:
+            response: 回應對象
+            attempt: 當前嘗試次數 (1-based)
+
+        Returns:
+            True 表示應該重試
+        """
+        if response.success:
+            return False
+        return attempt < self.max_retries
+
+    def _request_with_retry(
+        self,
+        url: str,
+        method: str = "GET",
+        response_type: str = "json",
+        headers: Optional[Dict[str, str]] = None,
+        proxy: Optional[str] = None,
+        timeout: int = 30,
+        use_auto_proxy: bool = True,
+        **kwargs
+    ) -> SpiderResponse:
+        """帶重試機制的 HTTP 請求
+
+        流程:
+            1. 建立標準化請求參數 (create_request_kwargs)
+            2. 發送請求 (requests.request)
+            3. 成功 → parse_response → 返回
+            4. 失敗 → _should_retry → 指數退避重試
+            5. 重試次數耗盡 → 返回失敗 SpiderResponse
+
+        Args:
+            url: 請求 URL
+            method: 請求方法 (GET/POST/...)
+            response_type: 回應解析類型 ('json', 'text', 'content')
+            headers: 自訂 Header
+            proxy: Proxy URL
+            timeout: 超時秒數
+            use_auto_proxy: 是否自動獲取 Proxy
+            **kwargs: 傳遞給 requests.request 的額外參數
+
+        Returns:
+            SpiderResponse
+        """
+        last_error = None
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                request_kwargs = self.create_request_kwargs(
+                    url=url, method=method, headers=headers,
+                    proxy=proxy, timeout=timeout, use_auto_proxy=use_auto_proxy,
+                    **kwargs
+                )
+
+                response = requests.request(**request_kwargs)
+                response.raise_for_status()
+
+                parsed = self.parse_response(response, response_type)
+                self.record_request(success=True)
+
+                if parsed.success or not self._should_retry(parsed, attempt):
+                    return parsed
+
+                last_error = parsed.error
+
+            except requests.RequestException as e:
+                last_error = str(e)
+                self.record_request(success=False)
+
+                if not self._should_retry(SpiderResponse(success=False, error=str(e)), attempt):
+                    return SpiderResponse(success=False, error=str(e), url=url)
+
+            if attempt < self.max_retries:
+                delay = self.retry_delay * (self.retry_backoff ** (attempt - 1))
+                logger.info("Retrying in %.1fs (attempt %d/%d)...", delay, attempt + 1, self.max_retries)
+                time.sleep(delay)
+
+        return SpiderResponse(
+            success=False,
+            error=f"All {self.max_retries} attempts failed: {last_error}",
+            url=url,
+        )
+
     def record_request(self, success: bool = True) -> None:
         """記錄請求統計"""
         self.request_count += 1

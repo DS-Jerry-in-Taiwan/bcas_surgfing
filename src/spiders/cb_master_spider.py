@@ -293,7 +293,7 @@ class CbMasterSpider(BaseSpider):
             return CbMasterItem(
                 cb_code=cb_code_val,
                 cb_name=mapped.get("cb_name", ""),
-                underlying_stock=mapped.get("underlying_stock", ""),
+                # underlying_stock 由 __post_init__ 自動從 cb_code[:4] 推導
                 issue_date=mapped.get("issue_date", ""),
                 maturity_date=mapped.get("maturity_date", ""),
                 conversion_price=mapped.get("conversion_price", ""),

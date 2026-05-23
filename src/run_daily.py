@@ -22,6 +22,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+import psycopg2
+
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 # Setup logging
@@ -35,6 +37,65 @@ DB_CONFIG = dict(
     host="localhost", port=5432, database="cbas",
     user="postgres", password="postgres",
 )
+
+
+def _extract_cb_symbols(cb_master_records: list) -> list:
+    """從 cb_master 記錄提取標的股代號 (去重、排序)
+
+    cb_master 的 cb_code 前 4 碼即為標的股代號。
+    例如: cb_code="26188" → symbol="2618"
+
+    Args:
+        cb_master_records: cb_master 的 to_dict() 列表
+
+    Returns:
+        排序後的唯一標的股代號列表
+    """
+    symbols = set()
+    for item in cb_master_records:
+        cb_code = item.get("cb_code", "")
+        if len(cb_code) >= 4 and cb_code[:4].isdigit():
+            symbols.add(cb_code[:4])
+    return sorted(symbols)
+
+
+def _update_symbol_registry(symbols: list, source: str = "cb_master") -> int:
+    """將 symbol 寫入 tracked_symbols（新符號才新增）
+    
+    Args:
+        symbols: 股票代號列表
+        source: 來源類型
+    
+    Returns:
+        新增筆數
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    added = 0
+    for sym in symbols:
+        cursor.execute("""
+            INSERT INTO tracked_symbols (symbol, source, added_at)
+            VALUES (%s, %s, CURRENT_DATE)
+            ON CONFLICT (symbol) DO NOTHING
+        """, (sym, source))
+        added += cursor.rowcount
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return added
+
+
+def _get_active_symbols() -> list:
+    """從 Registry 讀取要追蹤的 symbol"""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT symbol FROM tracked_symbols WHERE is_active ORDER BY symbol"
+    )
+    symbols = [r[0] for r in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    return symbols
 
 
 def step_spiders() -> tuple:
@@ -52,6 +113,7 @@ def step_spiders() -> tuple:
     from spiders.stock_daily_spider import StockDailySpider
     from spiders.tpex_cb_daily_spider import TpexCbDailySpider
     from spiders.broker_breakdown_spider import BrokerBreakdownSpider
+    from framework.base_spider import SpiderResponse
 
     results = {}
     records = {}
@@ -96,24 +158,38 @@ def step_spiders() -> tuple:
         s.close()
         raise
 
-    # Stock Daily（單一 symbol 示範）
+    # ★ 更新 Symbol Registry
+    symbols = _extract_cb_symbols(records.get("cb_master", []))
+    if symbols:
+        new_count = _update_symbol_registry(symbols)
+        logger.info("Symbol Registry: %d new, %d total", new_count, len(symbols))
+
+    # Stock Daily（從 Registry 讀取標的股）
     p = PostgresPipeline(table_name="stock_daily", batch_size=500, **DB_CONFIG)
     s = StockDailySpider(pipeline=p)
     s.collect_only = True
     try:
+        symbols = _get_active_symbols()
         now = datetime.now()
-        r = s.fetch_daily("2330", now.year, now.month)
+        if symbols:
+            logger.info("Fetching stock daily for %d symbols (all CB underlying stocks)", len(symbols))
+            for sym in symbols:
+                r = s.fetch_daily(sym, now.year, now.month)
+                if not r.success:
+                    logger.warning("Stock daily fetch failed for %s: %s", sym, r.error)
+                # 非阻斷：失敗繼續下一支
         results["stock_daily"] = {
-            "success": r.success,
-            "count": r.data.get("count", 0) if r.data else 0,
-            "error": r.error,
+            "success": True,
+            "count": len(s.get_items()),
+            "symbols_count": len(symbols),
         }
         records["stock_daily"] = [
             item.to_dict() for item in s.get_items()
         ]
         pipelines["stock_daily"] = (p, s)
     except Exception as e:
-        results["stock_daily"] = {"success": False, "error": str(e)}
+        logger.error("Stock daily step failed: %s", e)
+        results["stock_daily"] = {"success": False, "error": str(e), "count": len(s.get_items())}
         records["stock_daily"] = [
             item.to_dict() for item in s.get_items()
         ]
@@ -141,13 +217,18 @@ def step_spiders() -> tuple:
         s.close()
         raise
 
-    # Broker Breakdown
+    # Broker Breakdown（從 Registry 讀取標的股）
     p = PostgresPipeline(table_name="broker_breakdown", batch_size=500, **DB_CONFIG)
     s = BrokerBreakdownSpider(pipeline=p)
     s.collect_only = True
     try:
+        symbols = _get_active_symbols()
         today_str = datetime.now().strftime("%Y%m%d")
-        r = s.fetch_broker_breakdown(today_str, "2330")
+        if symbols:
+            logger.info("Fetching broker breakdown for %d symbols", len(symbols))
+            r = s.fetch_broker_breakdown_batch(today_str, symbols)
+        else:
+            r = SpiderResponse(success=False, error="No CB symbols available")
         results["broker_breakdown"] = {
             "success": r.success,
             "count": r.data.get("count", 0) if r.data else 0,

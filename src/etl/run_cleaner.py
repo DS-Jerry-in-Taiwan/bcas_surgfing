@@ -10,8 +10,11 @@ run_cleaner.py - 爬蟲資料清洗與驗證
 不假設執行順序，master 無對應資料時標記 NOT_FOUND 而非失敗。
 """
 import json
+import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 class DataCleaner:
@@ -26,6 +29,41 @@ class DataCleaner:
         import psycopg2
         self.conn = psycopg2.connect(**db_config)
         self.cur = self.conn.cursor()
+        self._run_pending_migrations()
+
+    # ─── auto migration ────────────────────────────────────────
+
+    def _run_pending_migrations(self) -> None:
+        """自動執行未執行的 DB migration
+
+        掃描 src/db/migration_*.sql 並依序執行。
+        使用 IF NOT EXISTS 確保冪等，可安全重複執行。
+        """
+        import os
+        migration_dir = os.path.join(
+            os.path.dirname(__file__), "..", "db"
+        )
+        if not os.path.isdir(migration_dir):
+            return
+
+        migration_files = sorted([
+            f for f in os.listdir(migration_dir)
+            if f.startswith("migration_") and f.endswith(".sql")
+        ])
+
+        for filename in migration_files:
+            filepath = os.path.join(migration_dir, filename)
+            logger.info("Running migration: %s", filename)
+            with open(filepath, "r") as f:
+                sql = f.read()
+            try:
+                self.cur.execute(sql)
+                self.conn.commit()
+                logger.info("Migration %s applied successfully", filename)
+            except Exception as e:
+                self.conn.rollback()
+                logger.error("Migration %s failed: %s", filename, e)
+                raise
 
     # ─── stock_daily vs stock_master ────────────────────────────
 

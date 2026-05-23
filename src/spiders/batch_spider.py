@@ -73,7 +73,10 @@ class BatchSpider:
         """取得或建立 Spider 實例"""
         spider_key = "default"
         if spider_key not in self._spider_cache:
-            self._spider_cache[spider_key] = self.spider_class(pipeline=self.pipeline)
+            self._spider_cache[spider_key] = self.spider_class(
+                pipeline=self.pipeline,
+                max_retries=self.max_retries,
+            )
         return self._spider_cache[spider_key]
     
     def _generate_keys(

@@ -2,9 +2,9 @@
 Premium Calculator - 轉換價值與溢價率計算
 
 公式:
-    轉換價值 = (CB收盤價 ÷ 轉換價格) × 1000 × 現股收盤價
-    溢價率   = (CB收盤價 ÷ 轉換價值) - 1
-    廢棄門檻: 溢價率 > 5% → is_junk = True
+     轉換價值 = (100 ÷ 轉換價格) × 現股收盤價
+     溢價率   = (CB收盤價 ÷ 轉換價值) - 1
+     廢棄門檻: 溢價率 > 5% → is_junk = True
 
 用法:
     python -m src.analytics.premium_calculator --date 2026-05-11
@@ -25,22 +25,23 @@ class PremiumCalculator:
     JUNK_THRESHOLD = JUNK_THRESHOLD  # 溢價率 > 5% 視為廢棄標的
 
     @staticmethod
-    def calculate_conversion_value(
-        cb_close: float, conversion_price: float, stock_close: float
-    ) -> float:
-        """計算轉換價值
+    def calculate_conversion_value(conversion_price: float, stock_close: float) -> float:
+        """計算轉換價值 (百元報價單位，與 cb_close 一致)
+
+        台灣可轉債面額 100,000 元，報價採百元報價 (100 = 100% = 十萬)，
+        因此每百元面額的轉換價值 = (100 / 轉換價格) × 現股收盤價。
+        此值與 cb_close (百元報價) 單位一致，可直接用於溢價率計算。
 
         Args:
-            cb_close: CB 收盤價
             conversion_price: 轉換價格
             stock_close: 現股收盤價
 
         Returns:
-            轉換價值; conversion_price <= 0 時回傳 0.0
+            轉換價值 (百元報價單位); conversion_price <= 0 時回傳 0.0
         """
         if conversion_price <= 0:
             return 0.0
-        return (cb_close / conversion_price) * 1000 * stock_close
+        return (100.0 / conversion_price) * stock_close
 
     @staticmethod
     def calculate_premium_ratio(cb_close: float, conversion_value: float) -> float:
@@ -126,7 +127,7 @@ class PremiumCalculator:
 
                 # 計算
                 conv_value = self.calculate_conversion_value(
-                    float(cb_close), float(conv_price), stock_close
+                    float(conv_price), stock_close
                 )
                 prem_ratio = self.calculate_premium_ratio(
                     float(cb_close), conv_value
