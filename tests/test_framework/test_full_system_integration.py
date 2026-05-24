@@ -221,18 +221,24 @@ class TestFullPipelineFlow:
         assert len(all_items) == 3
 
     def test_full_fetch_tpex_master(self):
-        """完整調用測試: mock HTTP → fetch_tpex → pipeline 驗證"""
+        """完整調用測試: mock HTTP → fetch_tpex (OpenAPI JSON) → pipeline 驗證"""
         pipeline = MemoryPipeline()
         spider = StockMasterSpider(pipeline=pipeline)
-        tpex_mock = Mock(status_code=200)
-        tpex_mock.text = "<table><tr><th>有價證券代號及名稱</th></tr><tr><td>1234　測試股</td></tr></table>"
-        tpex_mock.encoding = "utf-8"
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = [
+            {"SecuritiesCompanyCode": "1240", "CompanyAbbreviation": "茂生農經",
+             "SecuritiesIndustryCode": "33", "DateOfListing": "20180808"},
+        ]
+        mock_resp.encoding = "utf-8"
 
-        with patch('requests.get', return_value=tpex_mock):
+        with patch('requests.get', return_value=mock_resp):
             result = spider.fetch_tpex()
             assert result.success is True
 
         assert len(pipeline.get_items()) >= 1
+        item = pipeline.get_items()[0]
+        assert item.symbol == "1240"
+        assert item.market_type == "TPEx"
 
     def test_full_fetch_stock_daily_empty_response(self):
         """完整調用測試: API 回傳空資料 → spider 正確處理"""

@@ -185,23 +185,27 @@ class TestStockMasterSpiderFetch:
     
     @patch('spiders.stock_master_spider.requests.get')
     def test_fetch_tpex_success(self, mock_get):
-        """測試 TPEx 抓取成功"""
-        html = """
-        <table>
-            <tr><th>有價證券代號及名稱</th></tr>
-            <tr><td>6457　紘康</td></tr>
-        </table>
-        """
+        """測試 TPEx OpenAPI 抓取成功"""
+        mock_data = [
+            {"SecuritiesCompanyCode": "1240", "CompanyAbbreviation": "茂生農經",
+             "SecuritiesIndustryCode": "33", "DateOfListing": "20180808"},
+            {"SecuritiesCompanyCode": "1259", "CompanyAbbreviation": "安心",
+             "SecuritiesIndustryCode": "33", "DateOfListing": "20111215"},
+        ]
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.text = html
+        mock_response.json.return_value = mock_data
         mock_get.return_value = mock_response
         
         response = self.spider.fetch_tpex()
         
         assert response.success is True
-        assert response.data["count"] == 1
-        assert len(self.spider.tpex_items) == 1
+        assert response.data["count"] == 2
+        assert len(self.spider.tpex_items) == 2
+        assert self.spider.tpex_items[0].symbol == "1240"
+        assert self.spider.tpex_items[0].market_type == "TPEx"
+        assert self.spider.tpex_items[0].industry == "33"
+        assert self.spider.tpex_items[0].listing_date == "20180808"
     
     def test_fetch_all(self):
         """測試 fetch_all"""

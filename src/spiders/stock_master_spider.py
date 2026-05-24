@@ -35,12 +35,14 @@ class StockMasterSpider(BaseSpider):
     
     Attributes:
         TWSE_URL: TWSE ISIN 頁面 URL
-        TPEX_URL: TPEx ISIN 頁面 URL
+        TPEX_API_URL: TPEx OpenAPI 上櫃股票基本資料端點
+        TPEX_URL: (deprecated) 舊 TPEx ISIN 頁面 URL
         pipeline: 資料寫入管道
         items: 已抓取的股票列表
     """
     
     TWSE_URL = "https://isin.twse.com.tw/isin/C_public.jsp?strMode=2"
+    TPEX_API_URL = "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"
     TPEX_URL = "https://isin.tpex.org.tw/isin/C_public.jsp?strMode=4"
     
     def __init__(
@@ -125,32 +127,33 @@ class StockMasterSpider(BaseSpider):
     
     def fetch_tpex(self) -> SpiderResponse:
         """
-        抓取 TPEx 股票主檔
+        抓取 TPEx 上櫃股票主檔（透過 TPEx OpenAPI）
+        
+        資料來源: /mopsfin_t187ap03_O
+        提供所有上櫃公司基本資料（代號、簡稱、產業、上櫃日期等）
         
         Returns:
             SpiderResponse
         """
         try:
-            logger.info(f"Fetching TPEx from {self.TPEX_URL}")
+            logger.info(f"Fetching TPEx from OpenAPI: {self.TPEX_API_URL}")
             
             response = requests.get(
-                self.TPEX_URL,
-                headers=self.headers,
+                self.TPEX_API_URL,
+                headers={**self.headers, "Accept": "application/json"},
                 timeout=30
             )
             
             if response.status_code != 200:
-                logger.warning(f"TPEx fetch failed: HTTP {response.status_code}")
+                logger.warning(f"TPEx API fetch failed: HTTP {response.status_code}")
                 self.record_request(success=False)
                 return SpiderResponse(
                     success=False,
                     error=f"HTTP {response.status_code}",
-                    url=self.TPEX_URL
+                    url=self.TPEX_API_URL
                 )
             
-            response.encoding = "utf-8"
-            
-            items = self.parse_tpex_html(response.text)
+            items = self._parse_tpex_api(response.json())
             self.tpex_items.extend(items)
             self.items.extend(items)
             
@@ -162,7 +165,7 @@ class StockMasterSpider(BaseSpider):
             return SpiderResponse(
                 success=True,
                 data={"count": len(items)},
-                url=self.TPEX_URL,
+                url=self.TPEX_API_URL,
                 metadata={"market": "TPEx"}
             )
             
@@ -172,7 +175,7 @@ class StockMasterSpider(BaseSpider):
             return SpiderResponse(
                 success=False,
                 error=str(e),
-                url=self.TPEX_URL
+                url=self.TPEX_API_URL
             )
     
     def parse_twse_html(self, html_content: str) -> List[StockMasterItem]:
@@ -268,9 +271,67 @@ class StockMasterSpider(BaseSpider):
         
         return items
     
+    def _parse_tpex_api(self, api_data: list) -> List[StockMasterItem]:
+        """
+        解析 TPEx OpenAPI JSON 回傳
+        
+        API 端點: /mopsfin_t187ap03_O
+        欄位對應:
+          - SecuritiesCompanyCode → symbol
+          - CompanyAbbreviation  → name
+          - SecuritiesIndustryCode → industry
+          - DateOfListing        → listing_date
+        
+        Args:
+            api_data: API 回傳的 JSON list
+        
+        Returns:
+            StockMasterItem 列表
+        """
+        items = []
+        
+        if not isinstance(api_data, list):
+            logger.warning("TPEx API: expected list, got %s", type(api_data).__name__)
+            return items
+        
+        for record in api_data:
+            try:
+                symbol = str(record.get("SecuritiesCompanyCode", "")).strip()
+                name = str(record.get("CompanyAbbreviation", "")).strip()
+                
+                if not symbol or not name:
+                    continue
+                
+                industry = str(record.get("SecuritiesIndustryCode", "")).strip()
+                listing_date = str(record.get("DateOfListing", "")).strip()
+                
+                item = StockMasterItem(
+                    symbol=symbol,
+                    name=name,
+                    market_type="TPEx",
+                    industry=industry,
+                    listing_date=listing_date,
+                    source_url=self.TPEX_API_URL,
+                    source_type="tpex"
+                )
+                
+                if item.validate():
+                    items.append(item)
+                    
+            except Exception as e:
+                logger.debug("TPEx API record parse error: %s", e)
+                continue
+        
+        logger.info("TPEx: Parsed %d items from OpenAPI", len(items))
+        return items
+    
     def parse_tpex_html(self, html_content: str) -> List[StockMasterItem]:
         """
-        解析 TPEx HTML
+        解析 TPEx HTML（已廢棄，保留供 CLI 向下相容）
+        
+        Note:
+            此方法使用舊的 isin.tpex.org.tw 頁面，該站點已無法連線。
+            現在使用 _parse_tpex_api() 替代。
         
         Args:
             html_content: HTML 內容
@@ -278,6 +339,7 @@ class StockMasterSpider(BaseSpider):
         Returns:
             StockMasterItem 列表
         """
+        logger.warning("parse_tpex_html is deprecated, use _parse_tpex_api instead")
         items = []
         
         try:
