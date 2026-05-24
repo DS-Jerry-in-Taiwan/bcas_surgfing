@@ -98,8 +98,11 @@ def _get_active_symbols() -> list:
     return symbols
 
 
-def step_spiders() -> tuple:
+def step_spiders(skip_master: bool = False) -> tuple:
     """Step 1: 執行爬蟲（collect_only 模式，不寫入 DB）
+    
+    Args:
+        skip_master: 若為 True，跳過 stock_master 更新
     
     Returns:
         (metadata_results, collected_records, pipelines)
@@ -119,24 +122,32 @@ def step_spiders() -> tuple:
     records = {}
     pipelines = {}
 
-    # Stock Master
-    p = PostgresPipeline(table_name="stock_master", batch_size=500, **DB_CONFIG)
-    s = StockMasterSpider(pipeline=p)
-    s.collect_only = True
-    try:
-        r = s.fetch_twse()
-        results["stock_master"] = {
-            "success": r.success,
-            "count": r.data.get("count", 0) if r.data else 0,
-            "error": r.error,
-        }
-        records["stock_master"] = [
-            item.to_dict() for item in s.get_items()
-        ]
-        pipelines["stock_master"] = (p, s)
-    except:
-        s.close()
-        raise
+    # Stock Master (TWSE + TPEx) — 參考資料，不需每天更新
+    if not skip_master:
+        p = PostgresPipeline(table_name="stock_master", batch_size=500, **DB_CONFIG)
+        s = StockMasterSpider(pipeline=p)
+        s.collect_only = True
+        try:
+            r1 = s.fetch_twse()
+            r2 = s.fetch_tpex()
+            twse_count = r1.data.get("count", 0) if r1.data else 0
+            tpex_count = r2.data.get("count", 0) if r2.data else 0
+            results["stock_master"] = {
+                "success": r1.success and r2.success,
+                "count": twse_count + tpex_count,
+                "twse_count": twse_count,
+                "tpex_count": tpex_count,
+                "error": r2.error if not r2.success else r1.error if not r1.success else None,
+            }
+            records["stock_master"] = [
+                item.to_dict() for item in s.get_items()
+            ]
+            pipelines["stock_master"] = (p, s)
+        except:
+            s.close()
+            raise
+    else:
+        logger.info("--skip-master: 跳過 stock_master 更新")
 
     # CB Master
     p = PostgresPipeline(table_name="cb_master", batch_size=500, **DB_CONFIG)
@@ -430,6 +441,46 @@ def step_validate(spider_results: dict, collected_records: dict = None) -> dict:
         }
 
 
+def step_master_only() -> dict:
+    """只更新 stock_master（TWSE + TPEx），跳過其他所有步驟"""
+    logger.info("=" * 60)
+    logger.info("Master Only: 只更新 stock_master")
+    logger.info("=" * 60)
+
+    from framework.pipelines import PostgresPipeline
+    from spiders.stock_master_spider import StockMasterSpider
+
+    p = PostgresPipeline(table_name="stock_master", batch_size=500, **DB_CONFIG)
+    s = StockMasterSpider(pipeline=p)
+    s.collect_only = True
+
+    result = {}
+    try:
+        r1 = s.fetch_twse()
+        r2 = s.fetch_tpex()
+        twse_count = r1.data.get("count", 0) if r1.data else 0
+        tpex_count = r2.data.get("count", 0) if r2.data else 0
+        result["stock_master"] = {
+            "success": r1.success and r2.success,
+            "count": twse_count + tpex_count,
+            "twse_count": twse_count,
+            "tpex_count": tpex_count,
+            "error": r2.error if not r2.success else r1.error if not r1.success else None,
+        }
+        if s.get_pending_count() > 0:
+            s.flush_items(p)
+        p.close()
+        s.close()
+        logger.info("Master only: TWSE %d, TPEx %d, total %d",
+                     twse_count, tpex_count, twse_count + tpex_count)
+    except Exception as e:
+        logger.error("Master only failed: %s", e)
+        s.close()
+        result["stock_master"] = {"success": False, "error": str(e)}
+
+    return result
+
+
 def step_clean() -> dict:
     """Step 3: 執行清洗"""
     from etl.run_cleaner import DataCleaner
@@ -448,7 +499,16 @@ def main():
                         help="只跑爬蟲+驗證（不寫入DB或清洗）")
     parser.add_argument("--force-validation", action="store_true",
                         help="驗證失敗也繼續（跳過中止）")
+    parser.add_argument("--skip-master", action="store_true",
+                        help="跳過 stock_master 更新（股票主檔是參考資料，不需每天更新）")
+    parser.add_argument("--master-only", action="store_true",
+                        help="只更新 stock_master（TWSE + TPEx），適合排程在週日執行")
     args = parser.parse_args()
+
+    if args.master_only:
+        result = step_master_only()
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
 
     report = {"timestamp": datetime.now().isoformat()}
 
@@ -456,7 +516,7 @@ def main():
         print("=" * 60)
         print("Step 1: 爬蟲（collect only，暫不寫入 DB）")
         print("=" * 60)
-        spider_result, spider_records, spider_pipelines = step_spiders()
+        spider_result, spider_records, spider_pipelines = step_spiders(skip_master=args.skip_master)
         report["spiders"] = spider_result
         for name, r in spider_result.items():
             status = "✅" if r.get("success") else "❌"
