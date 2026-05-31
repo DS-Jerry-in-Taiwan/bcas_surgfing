@@ -116,8 +116,9 @@ class TestStage4RiskAssessorReceivesChipResults:
         mock_conn.cursor.return_value = mock_cursor
 
         # 設定 daily_analysis_results 資料
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),  # premium=1%, low risk
+            ("2330", 0.01, False, None, False),  # premium=1%, low risk
         ]
 
         # 設定 ChipProfiler 回傳值（高風險 35%）
@@ -160,8 +161,9 @@ class TestStage4RiskAssessorReceivesChipResults:
         mock_conn.cursor.return_value = mock_cursor
 
         # 相同 premium 但不同 risk_ratio 應得到不同評級
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),
+            ("2330", 0.01, False, None, False),
         ]
 
         mock_profiler_instance = MagicMock()
@@ -197,8 +199,9 @@ class TestStage4BrokerRiskPctWritten:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.025, False),  # premium=2.5% → A if risk<20%
+            ("2330", 0.025, False, None, False),  # premium=2.5% → A if risk<20%
         ]
 
         mock_profiler_instance = MagicMock()
@@ -240,8 +243,9 @@ class TestStage4BrokerRiskPctWritten:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),
+            ("2330", 0.01, False, None, False),
         ]
 
         mock_profiler_instance = MagicMock()
@@ -285,8 +289,9 @@ class TestStage4FullRatingChain:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", premium, False),
+            ("2330", premium, False, None, False),
         ]
 
         mock_profiler_instance = MagicMock()
@@ -335,8 +340,9 @@ class TestStage4BSRFallback:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),
+            ("2330", 0.01, False, None, False),
         ]
 
         # ChipProfiler 回傳空字典（無任何 BSR 資料）
@@ -377,9 +383,10 @@ class TestStage4BSRFallback:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),   # 有 chip data
-            ("2303", 0.02, False),   # 無 chip data
+            ("2330", 0.01, False, None, False),   # 有 chip data
+            ("2303", 0.02, False, None, False),   # 無 chip data
         ]
 
         mock_profiler_instance = MagicMock()
@@ -516,8 +523,9 @@ class TestStage4EODPipeline:
                 mock_cursor = MagicMock()
                 mock_db.connect.return_value = mock_conn
                 mock_conn.cursor.return_value = mock_cursor
+                # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
                 mock_cursor.fetchall.return_value = [
-                    ("2330", 0.01, False),
+                    ("2330", 0.01, False, None, False),
                 ]
 
                 mock_chip_instance = MagicMock()

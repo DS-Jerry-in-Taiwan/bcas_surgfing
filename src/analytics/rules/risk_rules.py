@@ -25,4 +25,5 @@ SIGNAL_MAP = {
     "A": "BUY",
     "B": "HOLD",
     "C": "AVOID",
+    "D": "NONE",         # 到期或停止轉換，不產生交易信號
 }

@@ -27,8 +27,14 @@ class RiskAssessor:
     """風險評級：S/A/B/C 與交易信號"""
 
     @staticmethod
-    def assess(premium_ratio: float, risk_ratio: float) -> str:
+    def assess(premium_ratio: float, risk_ratio: float,
+               days_to_expiry: Optional[int] = None,
+               is_stopped: bool = False) -> str:
         """綜合評級
+
+        D 評級為前置判斷 (最高優先級):
+          - 剩餘到期日 < 30 天
+          - 處於停止轉換期
 
         溢價率與風險佔比都要小於門檻才給對應評級。
         使用「小於」比較 (相等不算通過)。
@@ -36,10 +42,17 @@ class RiskAssessor:
         Args:
             premium_ratio: 溢價率 (0.05 = 5%)
             risk_ratio: 風險佔比 (0.10 = 10%)
+            days_to_expiry: 距離到期天數 (None 表示無資料)
+            is_stopped: 是否處於停止轉換期
 
         Returns:
-            "S", "A", "B", "C"
+            "S", "A", "B", "C", "D"
         """
+        # D 評級前置判斷 (最高優先級)
+        if (days_to_expiry is not None and days_to_expiry < 30) or is_stopped:
+            return "D"
+
+        # 原有 S/A/B/C 邏輯
         for rating in ["S", "A", "B"]:
             threshold = RATING_THRESHOLDS[rating]
             if (
@@ -80,9 +93,10 @@ class RiskAssessor:
         cursor = conn.cursor()
 
         try:
-            # 讀取當日分析結果 (含 premium_ratio)
+            # 讀取當日分析結果 (含 premium_ratio, days_to_expiry, is_stopped)
             cursor.execute("""
-                SELECT symbol, premium_ratio, is_junk
+                SELECT symbol, premium_ratio, is_junk,
+                       days_to_expiry, is_stopped
                 FROM daily_analysis_results
                 WHERE date = %s
             """, (date,))
@@ -93,17 +107,26 @@ class RiskAssessor:
             chip_results = profiler.analyze(date)
 
             results = []
-            for symbol, premium_ratio, is_junk in analysis_rows:
+            for symbol, premium_ratio, is_junk, days_to_expiry, is_stopped in analysis_rows:
                 premium = float(premium_ratio) if premium_ratio else 999.0
 
-                # 廢棄標的直接給 C
+                # 廢棄標的直接給 C (除非 D 條件優先)
                 if is_junk:
-                    rating = "C"
-                    risk_ratio = 0.0
+                    # 即使 is_junk 也要檢查 D 條件
+                    days_int = int(days_to_expiry) if days_to_expiry is not None else None
+                    if (days_int is not None and days_int < 30) or is_stopped:
+                        rating = "D"
+                        risk_ratio = 0.0
+                    else:
+                        rating = "C"
+                        risk_ratio = 0.0
                 else:
                     chip_info = chip_results.get(symbol, {})
                     risk_ratio = chip_info.get("risk_ratio", 0.0)
-                    rating = self.assess(premium, risk_ratio)
+                    days_int = int(days_to_expiry) if days_to_expiry is not None else None
+                    rating = self.assess(premium, risk_ratio,
+                                         days_to_expiry=days_int,
+                                         is_stopped=is_stopped)
 
                 signal = self.generate_signal(rating)
 
@@ -116,17 +139,18 @@ class RiskAssessor:
                     WHERE date = %s AND symbol = %s
                 """, (rating, risk_ratio * 100, risk_ratio * 100, date, symbol))
 
-                # 寫入 trading_signals (upsert)
-                cursor.execute("""
-                    INSERT INTO trading_signals (date, symbol, signal_type, confidence, notes)
-                    VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (date, symbol, signal_type) DO UPDATE SET
-                        confidence = EXCLUDED.confidence,
-                        notes = EXCLUDED.notes
-                """, (
-                    date, symbol, signal, _confidence(rating),
-                    f"溢價率:{premium:.2%},風險:{risk_ratio:.1%}"
-                ))
+                # D 評級不寫入 trading_signals
+                if rating != "D":
+                    cursor.execute("""
+                        INSERT INTO trading_signals (date, symbol, signal_type, confidence, notes)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (date, symbol, signal_type) DO UPDATE SET
+                            confidence = EXCLUDED.confidence,
+                            notes = EXCLUDED.notes
+                    """, (
+                        date, symbol, signal, _confidence(rating),
+                        f"溢價率:{premium:.2%},風險:{risk_ratio:.1%}"
+                    ))
 
                 results.append({
                     "symbol": symbol,

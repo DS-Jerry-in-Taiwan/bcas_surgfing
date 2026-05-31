@@ -179,10 +179,11 @@ class TestRunAnalysis:
         mock_conn.cursor.return_value = mock_cursor
 
         # Mock daily_analysis_results query
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, False),   # symbol, premium_ratio, is_junk
-            ("2303", 0.04, False),   # B級
-            ("2317", 0.06, False),   # C級 (溢價率超標)
+            ("2330", 0.01, False, None, False),   # S級
+            ("2303", 0.04, False, None, False),   # B級
+            ("2317", 0.06, False, None, False),   # C級 (溢價率超標)
         ]
 
         # Mock ChipProfiler
@@ -238,8 +239,9 @@ class TestRunAnalysis:
         mock_conn.cursor.return_value = mock_cursor
 
         # is_junk = True → should get C regardless
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", 0.01, True),   # junk
+            ("2330", 0.01, True, None, False),   # junk
         ]
 
         mock_profiler_instance = MagicMock()
@@ -289,8 +291,9 @@ class TestRunAnalysis:
         mock_psycopg2.connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        # (symbol, premium_ratio, is_junk, days_to_expiry, is_stopped)
         mock_cursor.fetchall.return_value = [
-            ("2330", None, False),  # NULL premium_ratio
+            ("2330", None, False, None, False),  # NULL premium_ratio
         ]
 
         mock_profiler_instance = MagicMock()

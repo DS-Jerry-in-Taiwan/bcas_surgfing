@@ -15,6 +15,7 @@ from typing import List, Optional
 import psycopg2
 
 from src.analytics.models import AnalysisResult
+from src.analytics.instrument_filter import InstrumentFilter
 from src.analytics.rules.technical_rules import JUNK_THRESHOLD
 from src.run_daily import DB_CONFIG
 
@@ -93,6 +94,9 @@ class PremiumCalculator:
         cursor = conn.cursor()
 
         try:
+            # 取得標的過濾結果 (到期日 + 停止轉換期)
+            filter_result = InstrumentFilter().filter(date)
+
             # 讀取 tpex_cb_daily (當日 CB 日行情)
             # 注意: tpex_cb_daily 的 conversion_price 和 underlying_stock
             # 來自 CSV 預設值 (0 和空字串)，需從 cb_master 取得真實值
@@ -109,10 +113,12 @@ class PremiumCalculator:
 
             results: List[AnalysisResult] = []
             for cb_code, cb_close, conv_price, under_stock, _ in cb_records:
-                if not cb_close or not conv_price or not under_stock:
+                # 注意: DB 欄位皆為 TEXT 型態，空字串/0 字串需用 float 判斷
+                if not under_stock:
                     continue
-                # conv_price 可能為 '0' (字串)，也跳過
-                if float(conv_price) <= 0:
+                if not cb_close or float(cb_close) <= 0:
+                    continue
+                if not conv_price or float(conv_price) <= 0:
                     continue
 
                 # 讀取對應現股收盤價
@@ -133,6 +139,7 @@ class PremiumCalculator:
                     float(cb_close), conv_value
                 )
 
+                fr = filter_result.get(under_stock)
                 results.append(AnalysisResult(
                     date=date,
                     symbol=under_stock,
@@ -140,6 +147,8 @@ class PremiumCalculator:
                     conversion_value=round(conv_value, 2),
                     premium_ratio=round(prem_ratio, 4),
                     is_junk=self.is_junk(prem_ratio),
+                    days_to_expiry=fr.days_to_expiry if fr else None,
+                    is_stopped=fr.is_stopped if fr else False,
                 ))
 
             return results
@@ -168,17 +177,20 @@ class PremiumCalculator:
             cursor.execute("""
                 INSERT INTO daily_analysis_results
                 (date, symbol, close_price, conversion_value, premium_ratio,
-                 technical_signal, is_junk, notes)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 technical_signal, is_junk, days_to_expiry, is_stopped, notes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (date, symbol) DO UPDATE SET
                     close_price = EXCLUDED.close_price,
                     conversion_value = EXCLUDED.conversion_value,
                     premium_ratio = EXCLUDED.premium_ratio,
                     technical_signal = EXCLUDED.technical_signal,
-                    is_junk = EXCLUDED.is_junk
+                    is_junk = EXCLUDED.is_junk,
+                    days_to_expiry = EXCLUDED.days_to_expiry,
+                    is_stopped = EXCLUDED.is_stopped
             """, (
                 r.date, r.symbol, r.close_price, r.conversion_value,
-                r.premium_ratio, r.technical_signal, r.is_junk, r.notes
+                r.premium_ratio, r.technical_signal, r.is_junk,
+                r.days_to_expiry, r.is_stopped, r.notes
             ))
             saved += 1
 

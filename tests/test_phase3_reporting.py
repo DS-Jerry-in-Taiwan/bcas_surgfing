@@ -19,10 +19,12 @@ class TestMarkdownReporter:
         """報表包含 S/A/B/C 分段及正確的標的資料"""
         with patch('psycopg2.connect') as mock_connect:
             mock_cursor = MagicMock()
+            # SQL returns 9 cols: symbol, stock_name, cb_code, cb_name,
+            #   close_price, premium_ratio, broker_risk_pct, final_rating, signal_type
             mock_cursor.fetchall.return_value = [
-                ("2330", 452.0, 0.012, 5.3, "S", "BUY"),
-                ("2454", 350.0, 0.025, 8.1, "A", "BUY"),
-                ("3680", 78.5, 0.068, 12.1, "C", "AVOID"),
+                ("2330", "", "23308", "台積電CB", 452.0, 0.012, 5.3, "S", "BUY"),
+                ("2454", "", "24547", "聯發科CB", 350.0, 0.025, 8.1, "A", "BUY"),
+                ("3680", "", "36809", "家登CB", 78.5, 0.068, 12.1, "C", "AVOID"),
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value = mock_cursor
@@ -68,9 +70,10 @@ class TestMarkdownReporter:
         """S/A/B/C 分組順序正確"""
         with patch('psycopg2.connect') as mock_connect:
             mock_cursor = MagicMock()
+            # SQL returns 9 cols
             mock_cursor.fetchall.return_value = [
-                ("2330", 452.0, 0.012, 5.3, "S", "BUY"),
-                ("3680", 78.5, 0.068, 12.1, "C", "AVOID"),
+                ("2330", "", "23308", "台積電CB", 452.0, 0.012, 5.3, "S", "BUY"),
+                ("3680", "", "36809", "家登CB", 78.5, 0.068, 12.1, "C", "AVOID"),
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value = mock_cursor
@@ -88,9 +91,10 @@ class TestMarkdownReporter:
         """確認報表分組與 DB 資料一致"""
         with patch('psycopg2.connect') as mock_connect:
             mock_cursor = MagicMock()
+            # SQL returns 9 cols
             mock_cursor.fetchall.return_value = [
-                ("2330", 452.0, 0.012, 5.3, "S", "BUY"),
-                ("3680", 78.5, 0.068, 12.1, "C", "AVOID"),
+                ("2330", "", "23308", "台積電CB", 452.0, 0.012, 5.3, "S", "BUY"),
+                ("3680", "", "36809", "家登CB", 78.5, 0.068, 12.1, "C", "AVOID"),
             ]
             mock_conn = MagicMock()
             mock_conn.cursor.return_value = mock_cursor

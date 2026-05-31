@@ -90,7 +90,7 @@ class BsrClient:
             "Content-Type": "application/x-www-form-urlencoded",
         })
 
-        self.ocr = OcrSolver()
+        self.ocr = OcrSolver(gpu=True)
 
         self._viewstate: Optional[str] = None
         self._eventvalidation: Optional[str] = None

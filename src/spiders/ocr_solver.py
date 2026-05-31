@@ -26,9 +26,9 @@ class OcrSolver:
         初始化 OcrSolver
 
         Args:
-            gpu: 是否啟用 GPU 加速 (目前 ddddocr 自動偵測，此參數保留相容性)
+            gpu: 是否啟用 GPU 加速 (傳入 ddddocr 的 use_gpu 參數)
         """
-        self._ocr = ddddocr.DdddOcr()
+        self._ocr = ddddocr.DdddOcr(use_gpu=gpu)
         logger.info("OcrSolver initialized (gpu=%s)", gpu)
 
     def solve(self, image_bytes: bytes) -> str:
