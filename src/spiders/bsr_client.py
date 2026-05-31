@@ -72,7 +72,8 @@ class BsrClient:
     RECOVERY_TIMEOUT = 60
 
     def __init__(self, max_retries: int = 3, request_interval: float = 2.0,
-                 confidence_threshold: float = 0.1) -> None:
+                 confidence_threshold: float = 0.1,
+                 use_voting: bool = False) -> None:
         """
         初始化 BsrClient
 
@@ -80,10 +81,12 @@ class BsrClient:
             max_retries: captcha 錯誤最大重試次數
             request_interval: 每次 HTTP 請求間隔 (秒)
             confidence_threshold: OCR 信心度門檻，低於此值將重試 (0.0~1.0)
+            use_voting: 是否啟用 OCR 多 threshold 投票機制
         """
         self.max_retries = max_retries
         self.request_interval = request_interval
         self.confidence_threshold = confidence_threshold
+        self.use_voting = use_voting
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -106,8 +109,8 @@ class BsrClient:
 
         logger.info(
             "BsrClient initialized: max_retries=%d, request_interval=%.1f, "
-            "confidence_threshold=%.2f",
-            max_retries, request_interval, confidence_threshold,
+            "confidence_threshold=%.2f, use_voting=%s",
+            max_retries, request_interval, confidence_threshold, use_voting,
         )
 
     # ─── Circuit Breaker ─────────────────────────────────────────────
@@ -279,6 +282,14 @@ class BsrClient:
         img_bytes = self._get_captcha_image()
         if img_bytes is None:
             return None, 0.0
+
+        if self.use_voting:
+            captcha_text, confidence, detail = self.ocr.solve_with_voting(img_bytes)
+            logger.debug(
+                "Captcha voting result: %s (confidence=%.4f, detail=%s)",
+                captcha_text, confidence, detail,
+            )
+            return captcha_text, confidence
 
         captcha_text, confidence = self.ocr.solve_with_confidence(img_bytes)
         logger.debug("Captcha solved: %s (confidence=%.4f)", captcha_text, confidence)

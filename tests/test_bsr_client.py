@@ -320,6 +320,207 @@ class TestOcrSolver:
         assert text == "abcd"
         assert conf == 0.0
 
+    # ─── solve_with_voting tests (Phase 22) ────────────────────────
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_all_agree(self, mock_img_open, mock_dddd):
+        """所有 threshold + 原始圖都回傳相同文字"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        result_dict = {
+            "text": "abcd",
+            "probabilities": [
+                [[0.9, 0.1]],
+                [[0.85, 0.15]],
+                [[0.95, 0.05]],
+                [[0.8, 0.2]],
+            ],
+        }
+        # 5 calls: 1 original + 4 thresholds
+        mock_dddd().classification.side_effect = [result_dict] * 5
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img")
+        assert text == "abcd"
+        assert conf == pytest.approx(0.8, abs=1e-6)
+        assert detail["agreement"] == 1.0
+        assert detail["votes"]["abcd"] == 5
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_majority_wins(self, mock_img_open, mock_dddd):
+        """4 票 vs 1 票，多數勝"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # 4 results for "abcd", 1 for "abce"
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.95]], [[0.95]], [[0.95]], [[0.95]]]},
+            {"text": "abcd", "probabilities": [[[0.85]], [[0.85]], [[0.85]], [[0.85]]]},
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+            {"text": "abcd", "probabilities": [[[0.80]], [[0.80]], [[0.80]], [[0.80]]]},
+            {"text": "abce", "probabilities": [[[0.60]], [[0.60]], [[0.60]], [[0.60]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img")
+        assert text == "abcd"
+        assert detail["votes"]["abcd"] == 4
+        assert detail["votes"]["abce"] == 1
+        # avg conf of 4 abcd results: (0.95+0.85+0.90+0.80)/4 = 0.875
+        assert conf == pytest.approx(0.875, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_tie_break(self, mock_img_open, mock_dddd):
+        """2:2 平手，平均信心度較高者勝"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # 2 for "abcd" (high conf), 2 for "abce" (low conf), 1 for "abcf"
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+            {"text": "abcd", "probabilities": [[[0.85]], [[0.85]], [[0.85]], [[0.85]]]},
+            {"text": "abce", "probabilities": [[[0.60]], [[0.60]], [[0.60]], [[0.60]]]},
+            {"text": "abce", "probabilities": [[[0.70]], [[0.70]], [[0.70]], [[0.70]]]},
+            {"text": "abcf", "probabilities": [[[0.50]], [[0.50]], [[0.50]], [[0.50]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img")
+        assert text == "abcd"  # higher avg conf (0.875 vs 0.65)
+        assert detail["votes"]["abcd"] == 2
+        assert detail["votes"]["abce"] == 2
+        assert conf == pytest.approx((0.90 + 0.85) / 2, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_below_min_votes(self, mock_img_open, mock_dddd):
+        """所有結果都不同，低於 min_votes，fallback 到最高信心度"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # 5 different texts, each with 1 vote → below min_votes=2
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+            {"text": "abce", "probabilities": [[[0.80]], [[0.80]], [[0.80]], [[0.80]]]},
+            {"text": "abcf", "probabilities": [[[0.95]], [[0.95]], [[0.95]], [[0.95]]]},
+            {"text": "abcg", "probabilities": [[[0.70]], [[0.70]], [[0.70]], [[0.70]]]},
+            {"text": "abch", "probabilities": [[[0.60]], [[0.60]], [[0.60]], [[0.60]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img", min_votes=2)
+        # Fallback: highest single confidence is 0.95 (abcf, from threshold 150)
+        assert text == "abcf"
+        assert conf == pytest.approx(0.95, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_without_original(self, mock_img_open, mock_dddd):
+        """use_original=False，不包含原始圖結果"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # 4 results (all thresholds), no original
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+            {"text": "abcd", "probabilities": [[[0.85]], [[0.85]], [[0.85]], [[0.85]]]},
+            {"text": "abcd", "probabilities": [[[0.80]], [[0.80]], [[0.80]], [[0.80]]]},
+            {"text": "abce", "probabilities": [[[0.60]], [[0.60]], [[0.60]], [[0.60]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img", use_original=False)
+        assert text == "abcd"
+        assert detail["votes"]["abcd"] == 3
+        assert detail["votes"]["abce"] == 1
+        assert len(detail["results"]) == 4
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_custom_thresholds(self, mock_img_open, mock_dddd):
+        """自訂 thresholds=[100, 200]"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # 3 calls: 1 original + 2 custom thresholds
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+            {"text": "abcd", "probabilities": [[[0.80]], [[0.80]], [[0.80]], [[0.80]]]},
+            {"text": "abce", "probabilities": [[[0.70]], [[0.70]], [[0.70]], [[0.70]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(
+            b"img", thresholds=[100, 200]
+        )
+        assert text == "abcd"
+        assert detail["votes"]["abcd"] == 2
+        assert detail["votes"]["abce"] == 1
+        assert len(detail["results"]) == 3
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_single_result(self, mock_img_open, mock_dddd):
+        """只有一個 threshold 且 use_original=False 時正常運作"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.90]], [[0.90]], [[0.90]], [[0.90]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(
+            b"img", thresholds=[128], use_original=False
+        )
+        assert text == "abcd"
+        assert conf == pytest.approx(0.90, abs=1e-6)
+        assert detail["agreement"] == 1.0
+        assert len(detail["results"]) == 1
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    @patch("src.spiders.ocr_solver.Image.open")
+    def test_voting_non_dict_fallback(self, mock_img_open, mock_dddd):
+        """classification 回傳非 dict 時能正常 fallback"""
+        mock_img = MagicMock()
+        mock_img.convert.return_value = mock_img
+        mock_img.point.return_value = mock_img
+        mock_img_open.return_value = mock_img
+
+        # Original returns valid dict, one threshold returns plain string
+        mock_dddd().classification.side_effect = [
+            {"text": "abcd", "probabilities": [[[0.95]], [[0.95]], [[0.95]], [[0.95]]]},
+            {"text": "abcd", "probabilities": [[[0.85]], [[0.85]], [[0.85]], [[0.85]]]},
+            "plain_string",  # non-dict return
+            {"text": "abcd", "probabilities": [[[0.80]], [[0.80]], [[0.80]], [[0.80]]]},
+            {"text": "abcd", "probabilities": [[[0.75]], [[0.75]], [[0.75]], [[0.75]]]},
+        ]
+
+        solver = OcrSolver()
+        text, conf, detail = solver.solve_with_voting(b"img")
+        # "abcd" gets 4 votes, "plain_string" gets 1
+        assert text == "abcd"
+        assert detail["votes"]["abcd"] == 4
+        assert detail["votes"]["plain_string"] == 1
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 2. BsrClient Init Tests (≥4)
