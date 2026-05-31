@@ -167,6 +167,159 @@ class TestOcrSolver:
         result = solver.solve_with_preprocess(b"img", threshold=200)
         assert isinstance(result, str)
 
+    # ─── solve_with_confidence tests ─────────────────────────────
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_returns_tuple(self, mock_dddd):
+        """回傳 (text, confidence) tuple"""
+        mock_dddd().classification.return_value = {
+            "text": "abcd",
+            "probabilities": [
+                [[0.1, 0.8, 0.1]],
+                [[0.05, 0.05, 0.9]],
+            ],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "abcd"
+        assert isinstance(conf, float)
+        assert 0.0 <= conf <= 1.0
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_uses_min_of_max(self, mock_dddd):
+        """信心度取所有字元 max(prob) 的最小值"""
+        mock_dddd().classification.return_value = {
+            "text": "ab",
+            "probabilities": [
+                [[0.01, 0.01, 0.98]],  # max=0.98
+                [[0.4, 0.3, 0.3]],      # max=0.4
+            ],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "ab"
+        assert conf == pytest.approx(0.4, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_empty_result(self, mock_dddd):
+        """空字串回傳 (\"\", 0.0)"""
+        mock_dddd().classification.return_value = {
+            "text": "",
+            "probabilities": [],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == ""
+        assert conf == 0.0
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_no_probabilities(self, mock_dddd):
+        """無 probabilities 回傳 0.0"""
+        mock_dddd().classification.return_value = {
+            "text": "abc",
+            "probabilities": [],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "abc"
+        assert conf == 0.0
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_none_probabilities(self, mock_dddd):
+        """probabilities 為 None 回傳 0.0"""
+        mock_dddd().classification.return_value = {
+            "text": "abc",
+            "probabilities": None,
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "abc"
+        assert conf == 0.0
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_single_char(self, mock_dddd):
+        """單一字元"""
+        mock_dddd().classification.return_value = {
+            "text": "x",
+            "probabilities": [
+                [[0.05, 0.95]],
+            ],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "x"
+        assert conf == pytest.approx(0.95, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_png_fix_default_true(self, mock_dddd):
+        """預設 png_fix=True 傳入 ddddocr"""
+        mock_dddd().classification.return_value = {
+            "text": "ab",
+            "probabilities": [[[0.9, 0.1]], [[0.8, 0.2]]],
+        }
+        solver = OcrSolver()
+        solver.solve_with_confidence(b"img")
+        # 驗證有傳入 png_fix=True
+        _call_kwargs = mock_dddd().classification.call_args[1]
+        assert _call_kwargs.get("png_fix") is True
+        assert _call_kwargs.get("probability") is True
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_custom_png_fix(self, mock_dddd):
+        """可指定 png_fix=False"""
+        mock_dddd().classification.return_value = {
+            "text": "z",
+            "probabilities": [[[1.0]]],
+        }
+        solver = OcrSolver()
+        solver.solve_with_confidence(b"img", png_fix=False)
+        _call_kwargs = mock_dddd().classification.call_args[1]
+        assert _call_kwargs.get("png_fix") is False
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_high_confidence(self, mock_dddd):
+        """所有字元信心度都很高"""
+        mock_dddd().classification.return_value = {
+            "text": "abcdef",
+            "probabilities": [
+                [[0.99, 0.01]],
+                [[0.98, 0.02]],
+                [[0.97, 0.03]],
+                [[0.96, 0.04]],
+                [[0.95, 0.05]],
+                [[0.94, 0.06]],
+            ],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "abcdef"
+        assert conf == pytest.approx(0.94, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_low_confidence(self, mock_dddd):
+        """某字元信心度極低"""
+        mock_dddd().classification.return_value = {
+            "text": "a5c",
+            "probabilities": [
+                [[0.99, 0.01]],
+                [[0.45, 0.55]],   # 這個字元有點模糊
+                [[0.98, 0.02]],
+            ],
+        }
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "a5c"
+        assert conf == pytest.approx(0.55, abs=1e-6)
+
+    @patch("src.spiders.ocr_solver.ddddocr.DdddOcr")
+    def test_solve_with_confidence_non_dict_fallback(self, mock_dddd):
+        """若 ddddocr 回傳非 dict (e.g. probability=False 模式), fallback 到 (raw, 0.0)"""
+        mock_dddd().classification.return_value = "abcd"
+        solver = OcrSolver()
+        text, conf = solver.solve_with_confidence(b"img")
+        assert text == "abcd"
+        assert conf == 0.0
+
 
 # ═══════════════════════════════════════════════════════════════════
 # 2. BsrClient Init Tests (≥4)
@@ -586,7 +739,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """完整流程成功"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.return_value = _SAMPLE_RESULT_HTML
 
         client = BsrClient()
@@ -604,7 +757,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """captcha 錯誤後重試成功"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.side_effect = [
             _CAPTCHA_ERROR_HTML,
             _SAMPLE_RESULT_HTML,
@@ -623,7 +776,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """全部 captcha 重試失敗拋 BsrCaptchaError"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.return_value = _CAPTCHA_ERROR_HTML
 
         client = BsrClient(max_retries=3)
@@ -653,7 +806,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """captcha 解碼失敗拋 BsrConnectionError"""
-        mock_solve.return_value = None
+        mock_solve.return_value = (None, 0.0)
 
         client = BsrClient(max_retries=1)
         with pytest.raises(BsrConnectionError, match="Failed to solve captcha"):
@@ -667,7 +820,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """submit 回傳 None 拋 BsrConnectionError"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.return_value = None
 
         client = BsrClient(max_retries=1)
@@ -683,7 +836,7 @@ class TestBsrClientFetchBrokerData:
         self, mock_throttle, mock_download, mock_submit, mock_solve
     ):
         """完整流程走 CSV 格式"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.return_value = _SAMPLE_POST_WITH_CSV
         mock_download.return_value = _SAMPLE_CSV
 
@@ -701,6 +854,76 @@ class TestBsrClientFetchBrokerData:
         mock_solve.assert_called_once()
         mock_submit.assert_called_once_with("2330", "abcd")
         mock_download.assert_called_once()
+        client.close()
+
+    @patch.object(BsrClient, "_solve_captcha")
+    @patch.object(BsrClient, "_submit_query")
+    @patch.object(BsrClient, "_throttle")
+    def test_fetch_broker_data_low_confidence_retry_then_success(
+        self, mock_throttle, mock_submit, mock_solve
+    ):
+        """低信心度觸發重試，最終成功"""
+        # 前兩次低信心度，第三次高信心度成功
+        mock_solve.side_effect = [
+            ("abcd", 0.05),   # confidence < 0.1 → 重試
+            ("efgh", 0.08),   # confidence < 0.1 → 重試
+            ("ijkl", 0.95),   # confidence >= 0.1 → 繼續
+        ]
+        mock_submit.return_value = _SAMPLE_RESULT_HTML
+
+        client = BsrClient(max_retries=5, confidence_threshold=0.1)
+        result = client.fetch_broker_data("2330")
+        assert len(result) == 2
+        # solve 被呼叫 3 次，submit 只被呼叫 1 次 (信心度通過後)
+        assert mock_solve.call_count == 3
+        mock_submit.assert_called_once_with("2330", "ijkl")
+        client.close()
+
+    @patch.object(BsrClient, "_solve_captcha")
+    @patch.object(BsrClient, "_submit_query")
+    @patch.object(BsrClient, "_throttle")
+    def test_fetch_broker_data_low_confidence_all_retries(
+        self, mock_throttle, mock_submit, mock_solve
+    ):
+        """低信心度重試耗盡，仍繼續提交 (不中斷流程)"""
+        # 每次信心度都低，max_retries=2 時耗盡後照常送出
+        mock_solve.side_effect = [
+            ("a", 0.03),  # attempt 1: 信心度低，還有重試 → continue
+            ("b", 0.02),  # attempt 2: 信心度低，已耗盡 → 照常送出
+        ]
+        mock_submit.return_value = _SAMPLE_RESULT_HTML
+
+        client = BsrClient(max_retries=2, confidence_threshold=0.1)
+        result = client.fetch_broker_data("2330")
+        assert len(result) == 2
+        assert mock_solve.call_count == 2
+        # submit 最後一次結果
+        mock_submit.assert_called_once_with("2330", "b")
+        client.close()
+
+    @patch.object(BsrClient, "_solve_captcha")
+    @patch.object(BsrClient, "_submit_query")
+    @patch.object(BsrClient, "_throttle")
+    def test_fetch_broker_data_low_confidence_retry_then_high_confidence_then_captcha_error(
+        self, mock_throttle, mock_submit, mock_solve
+    ):
+        """低信心度重試 → 高信心度 → server 回傳驗證碼錯誤 → 重試邏輯正常運作"""
+        mock_solve.side_effect = [
+            ("a", 0.05),     # attempt 1: low confidence → retry
+            ("b", 0.95),     # attempt 2: high confidence but captcha error
+            ("c", 0.90),     # attempt 3: high confidence, success
+        ]
+        mock_submit.side_effect = [
+            _CAPTCHA_ERROR_HTML,
+            _SAMPLE_RESULT_HTML,
+        ]
+
+        client = BsrClient(max_retries=3, confidence_threshold=0.1)
+        result = client.fetch_broker_data("2330")
+        assert len(result) == 2
+        # solve 被呼叫 3 次，submit 2 次
+        assert mock_solve.call_count == 3
+        assert mock_submit.call_count == 2
         client.close()
 
 
@@ -739,7 +962,7 @@ class TestBsrClientCircuitBreaker:
         self, mock_throttle, mock_submit, mock_solve
     ):
         """成功請求後 circuit breaker 關閉"""
-        mock_solve.return_value = "abcd"
+        mock_solve.return_value = ("abcd", 1.0)
         mock_submit.return_value = _SAMPLE_RESULT_HTML
 
         client = BsrClient()
@@ -892,18 +1115,19 @@ class TestBsrClientSolveCaptcha:
 
     @patch.object(BsrClient, "_refresh_session")
     @patch.object(BsrClient, "_get_captcha_image")
-    @patch.object(OcrSolver, "solve")
+    @patch.object(OcrSolver, "solve_with_confidence")
     def test_solve_captcha_full_flow(
         self, mock_ocr_solve, mock_get_img, mock_refresh
     ):
         """refresh → download → OCR 完整流程"""
         mock_refresh.return_value = True
         mock_get_img.return_value = b"imgdata"
-        mock_ocr_solve.return_value = "wxyz"
+        mock_ocr_solve.return_value = ("wxyz", 0.95)
 
         client = BsrClient()
-        result = client._solve_captcha()
-        assert result == "wxyz"
+        text, confidence = client._solve_captcha()
+        assert text == "wxyz"
+        assert confidence == 0.95
         mock_refresh.assert_called_once()
         mock_get_img.assert_called_once()
         mock_ocr_solve.assert_called_once_with(b"imgdata")
@@ -911,22 +1135,24 @@ class TestBsrClientSolveCaptcha:
 
     @patch.object(BsrClient, "_refresh_session")
     def test_solve_captcha_refresh_fails(self, mock_refresh):
-        """refresh 失敗回傳 None"""
+        """refresh 失敗回傳 (None, 0.0)"""
         mock_refresh.return_value = False
 
         client = BsrClient()
-        result = client._solve_captcha()
-        assert result is None
+        text, confidence = client._solve_captcha()
+        assert text is None
+        assert confidence == 0.0
         client.close()
 
     @patch.object(BsrClient, "_refresh_session")
     @patch.object(BsrClient, "_get_captcha_image")
     def test_solve_captcha_download_fails(self, mock_get_img, mock_refresh):
-        """下載失敗回傳 None"""
+        """下載失敗回傳 (None, 0.0)"""
         mock_refresh.return_value = True
         mock_get_img.return_value = None
 
         client = BsrClient()
-        result = client._solve_captcha()
-        assert result is None
+        text, confidence = client._solve_captcha()
+        assert text is None
+        assert confidence == 0.0
         client.close()

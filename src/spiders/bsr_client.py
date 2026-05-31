@@ -71,16 +71,19 @@ class BsrClient:
     FAILURE_THRESHOLD = 5
     RECOVERY_TIMEOUT = 60
 
-    def __init__(self, max_retries: int = 3, request_interval: float = 2.0) -> None:
+    def __init__(self, max_retries: int = 3, request_interval: float = 2.0,
+                 confidence_threshold: float = 0.1) -> None:
         """
         初始化 BsrClient
 
         Args:
             max_retries: captcha 錯誤最大重試次數
             request_interval: 每次 HTTP 請求間隔 (秒)
+            confidence_threshold: OCR 信心度門檻，低於此值將重試 (0.0~1.0)
         """
         self.max_retries = max_retries
         self.request_interval = request_interval
+        self.confidence_threshold = confidence_threshold
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -102,8 +105,9 @@ class BsrClient:
         self._cb_last_open_time: float = 0.0
 
         logger.info(
-            "BsrClient initialized: max_retries=%d, request_interval=%.1f",
-            max_retries, request_interval,
+            "BsrClient initialized: max_retries=%d, request_interval=%.1f, "
+            "confidence_threshold=%.2f",
+            max_retries, request_interval, confidence_threshold,
         )
 
     # ─── Circuit Breaker ─────────────────────────────────────────────
@@ -260,23 +264,25 @@ class BsrClient:
             logger.error("Captcha download error: %s", e)
             return None
 
-    def _solve_captcha(self) -> Optional[str]:
+    def _solve_captcha(self) -> tuple[Optional[str], float]:
         """
-        refresh → download → OCR 完整流程
+        refresh → download → OCR 完整流程 (含信心度)
 
         Returns:
-            captcha 文字，或 None
+            (captcha_text, confidence)
+            - captcha_text: 辨識文字，失敗為 None
+            - confidence: 0.0~1.0，失敗為 0.0
         """
         if not self._refresh_session():
-            return None
+            return None, 0.0
 
         img_bytes = self._get_captcha_image()
         if img_bytes is None:
-            return None
+            return None, 0.0
 
-        captcha_text = self.ocr.solve(img_bytes)
-        logger.debug("Captcha solved: %s", captcha_text)
-        return captcha_text
+        captcha_text, confidence = self.ocr.solve_with_confidence(img_bytes)
+        logger.debug("Captcha solved: %s (confidence=%.4f)", captcha_text, confidence)
+        return captcha_text, confidence
 
     # ─── Form Submit ─────────────────────────────────────────────────
 
@@ -559,9 +565,23 @@ class BsrClient:
                         attempt, self.max_retries, symbol)
 
             try:
-                captcha_text = self._solve_captcha()
+                captcha_text, confidence = self._solve_captcha()
                 if captcha_text is None:
                     raise BsrConnectionError("Failed to solve captcha")
+
+                if confidence < self.confidence_threshold:
+                    if attempt < self.max_retries:
+                        logger.warning(
+                            "Low confidence %.3f < %.3f, retry %d/%d",
+                            confidence, self.confidence_threshold,
+                            attempt, self.max_retries,
+                        )
+                        self._throttle()
+                        continue
+                    logger.warning(
+                        "Low confidence %.3f, retries exhausted, submitting anyway",
+                        confidence,
+                    )
 
                 html = self._submit_query(symbol, captcha_text)
                 if html is None:
