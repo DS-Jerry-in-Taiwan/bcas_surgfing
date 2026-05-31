@@ -20,4 +20,6 @@ class AnalysisResult:
     premium_ratio: float = 0.0  # 溢價率 (小數, 0.05 = 5%)
     technical_signal: str = "NEUTRAL"  # BREAKOUT / BULLISH / NEUTRAL / BEARISH
     is_junk: bool = False  # 是否為廢棄標的 (溢價率 > 5%)
+    days_to_expiry: Optional[int] = None  # 距離到期天數
+    is_stopped: bool = False  # 是否處於停止轉換期
     notes: str = ""  # 備註

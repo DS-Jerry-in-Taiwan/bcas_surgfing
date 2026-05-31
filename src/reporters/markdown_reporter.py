@@ -23,8 +23,8 @@ class MarkdownReporter:
 
     SECTION_HEADER = """
 ## {icon} {title}
-| 標的 | 收盤價 | 溢價率 | 風險佔比 | 評級 | 信號 |
-|------|--------|--------|---------|------|------|
+| 代號 | 名稱 | CB 代號 | CB 名稱 | 收盤價 | 溢價率 | 風險佔比 | 評級 | 信號 |
+|------|------|--------|--------|--------|--------|---------|------|------|
 """
 
     RATING_CONFIG: List[Tuple[str, str]] = [
@@ -48,23 +48,35 @@ class MarkdownReporter:
         cursor = conn.cursor()
 
         try:
-            # 讀取分析結果
+            # 讀取分析結果（含 CB 代號/名稱 + 股票名稱）
             cursor.execute("""
-                SELECT d.symbol, d.close_price, d.premium_ratio,
+                SELECT DISTINCT ON (d.symbol)
+                       d.symbol,
+                       COALESCE(sm.name, '') AS stock_name,
+                       COALESCE(cm.cb_code, '') AS cb_code,
+                       COALESCE(cm.cb_name, '') AS cb_name,
+                       d.close_price, d.premium_ratio,
                        d.broker_risk_pct, d.final_rating,
-                       t.signal_type
+                       ts.signal_type
                 FROM daily_analysis_results d
-                LEFT JOIN trading_signals t
-                    ON d.date = t.date AND d.symbol = t.symbol
-                WHERE d.date = %s AND d.is_junk = false
-                ORDER BY d.final_rating, d.symbol
+                LEFT JOIN trading_signals ts
+                    ON d.date = ts.date AND d.symbol = ts.symbol
+                LEFT JOIN cb_master cm
+                    ON d.symbol = cm.underlying_stock
+                LEFT JOIN stock_master sm
+                    ON d.symbol = sm.symbol
+                WHERE d.date = %s
+                  AND d.is_junk = false
+                  AND (d.final_rating IS NULL OR d.final_rating != 'D')
+                ORDER BY d.symbol,
+                    CASE ts.signal_type WHEN 'BUY' THEN 1 WHEN 'HOLD' THEN 2 WHEN 'AVOID' THEN 3 ELSE 4 END
             """, (date,))
             rows = cursor.fetchall()
 
             # 依評級分組
             by_rating: dict = {r: [] for r, _ in self.RATING_CONFIG}
             for row in rows:
-                rating = row[4] or "C"
+                rating = row[7] or "C"  # final_rating index 7
                 if rating in by_rating:
                     by_rating[rating].append(row)
 
@@ -77,14 +89,19 @@ class MarkdownReporter:
                     continue
                 lines.append(self.SECTION_HEADER.format(icon=rating, title=title))
                 for row in items:
-                    symbol, close, premium, risk, _, signal = row
+                    # row layout:
+                    # symbol(0), stock_name(1), cb_code(2), cb_name(3),
+                    # close(4), premium(5), risk(6), final_rating(7), signal(8)
+                    symbol, stock_name, cb_code, cb_name = row[0], row[1], row[2], row[3]
+                    close, premium, risk, signal = row[4], row[5], row[6], row[8]
                     premium_str = f"{float(premium)*100:.2f}%" if premium else "N/A"
                     risk_str = f"{float(risk):.1f}%" if risk else "N/A"
                     close_str = f"{float(close):.2f}" if close else "N/A"
                     signal_str = signal or "HOLD"
                     lines.append(
-                        f"| {symbol} | {close_str} | {premium_str} "
-                        f"| {risk_str} | {rating} | {signal_str} |\n"
+                        f"| {symbol} | {stock_name} | {cb_code} | {cb_name} "
+                        f"| {close_str} | {premium_str} | {risk_str} "
+                        f"| {rating} | {signal_str} |\n"
                     )
 
             return "".join(lines)

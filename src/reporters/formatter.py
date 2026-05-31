@@ -59,7 +59,9 @@ class RichFormatter:
                 FROM daily_analysis_results d
                 LEFT JOIN trading_signals t
                     ON d.date = t.date AND d.symbol = t.symbol
-                WHERE d.date = %s AND d.is_junk = false
+                WHERE d.date = %s
+                  AND d.is_junk = false
+                  AND (d.final_rating IS NULL OR d.final_rating != 'D')
                 ORDER BY d.final_rating, d.symbol
             """, (date,))
             rows = cursor.fetchall()

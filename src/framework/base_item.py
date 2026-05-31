@@ -344,6 +344,8 @@ class DailyAnalysisResultItem(BaseItem):
     broker_risk_pct: float = 0.0
     final_rating: str = ""
     is_junk: bool = False
+    days_to_expiry: Optional[int] = None
+    is_stopped: bool = False
     notes: str = ""
     created_at: datetime = field(default_factory=_default_datetime)
     updated_at: datetime = field(default_factory=_default_datetime)
