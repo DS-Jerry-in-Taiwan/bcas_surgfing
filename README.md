@@ -5,37 +5,151 @@
 ## 📋 快速概覽
 
 **BCAS Quant Pipeline** 是一個完整的量化數據流水線系統，集成：
-- 🕷️ **4 個爬蟲**：股票主檔、股票日線、轉債主檔、TPEx 轉債日線
+- 🕷️ **5 個爬蟲**：股票主檔、股票日線、轉債主檔、TPEx 轉債日線、券商分點買賣超
 - ✅ **24 條驗證規則**（5 維度）：結構、完整性、值域、一致性、異常檢測
 - 🔄 **Go 異步排程器**：Cron + Webhook 觸發，非阻塞設計
 - 🧹 **數據清洗**：去重、交易日補充、主檔合併
-- 🗄️ **PostgreSQL 存儲**：4 張表，完整歷史記錄
+- 🗄️ **PostgreSQL 存儲**：5 張表，完整歷史記錄
+- 🔍 **BSR Captcha OCR**：自動辨識券商分點網站驗證碼（ddddocr）
+- 🎯 **EOD 盤後分析**：溢價計算、技術分析、風險評估、籌碼分析
+- 📊 **多管道通知**：Markdown 報表 + Telegram + 終端輸出
 
-**系統架構**: 3 層設計
+### 完整模組架構
+
+```mermaid
+flowchart TB
+    subgraph Entry["入口層"]
+        RUN_DAILY["run_daily.py<br/>每日排程調度"]
+        RUN_EOD["run_eod_analysis.py<br/>EOD 快捷入口"]
+    end
+
+    subgraph Pipeline["管道層"]
+        EOD_PIPELINE["EODPipeline<br/>盤後 4 階段管道"]
+        CLEANER["cleaner.py<br/>資料清洗"]
+        VALIDATOR["validator<br/>資料驗證"]
+    end
+
+    subgraph Framework["框架層"]
+        BASE_SPIDER["BaseSpider<br/>爬蟲基底類別"]
+        BASE_ITEM["BaseItem<br/>資料項基底類別"]
+        PIPELINES["PostgresPipeline<br/>DB 寫入管道"]
+        EXCEPTIONS["exceptions<br/>異常定義"]
+    end
+
+    subgraph Spiders["爬蟲層"]
+        STOCK_M["StockMasterSpider<br/>上市櫃股票清單"]
+        CB_M["CbMasterSpider<br/>可轉債基本資料"]
+        STOCK_D["StockDailySpider<br/>個股日行情"]
+        TPEX_D["TpexCbDailySpider<br/>櫃買可轉債日行情"]
+        BBS["BrokerBreakdownSpider<br/>券商分點買賣超"]
+    end
+
+    subgraph Clients["客戶端層"]
+        BSR["BsrClient<br/>BSR 網站專用驅動"]
+        OCR["OcrSolver<br/>OCR 抽象層"]
+    end
+
+    subgraph Analytics["分析層"]
+        PREMIUM["PremiumCalculator<br/>溢價計算"]
+        TECH["TechnicalAnalyzer<br/>技術分析"]
+        RISK["RiskAssessor<br/>風險評估"]
+        CHIP["ChipProfiler<br/>籌碼分析"]
+        FILTER["InstrumentFilter<br/>標的過濾"]
+        RULES["rules/<br/>分析規則庫"]
+    end
+
+    subgraph Report["通知/報表層"]
+        MARKDOWN["MarkdownReporter<br/>報表產生"]
+        TELEGRAM["TelegramNotifier<br/>Telegram 通知"]
+        TERMINAL["TerminalNotifier<br/>終端輸出"]
+        FORMATTER["formatter<br/>格式工具"]
+    end
+
+    subgraph External["外部系統"]
+        TWSE["TWSE 證交所"]
+        TPEX["TPEx 櫃買中心"]
+        BSR_WEB["bsr.twse.com.tw<br/>券商分點網站"]
+        PG[(PostgreSQL<br/>cbas)]
+    end
+
+    RUN_DAILY --> EOD_PIPELINE
+    RUN_EOD --> EOD_PIPELINE
+    EOD_PIPELINE -->|Stage 1| RUN_DAILY
+    RUN_DAILY --> Spiders
+    RUN_DAILY --> Analytics
+    RUN_DAILY --> VALIDATOR
+    RUN_DAILY --> CLEANER
+    RUN_DAILY --> Report
+    STOCK_M --> BASE_SPIDER
+    CB_M --> BASE_SPIDER
+    STOCK_D --> BASE_SPIDER
+    TPEX_D --> BASE_SPIDER
+    BBS --> BASE_SPIDER
+    BBS --> BSR
+    BSR --> OCR
+    BSR --> BSR_WEB
+    STOCK_M --> TWSE
+    STOCK_M --> TPEX
+    STOCK_D --> TWSE
+    CB_M --> TPEX
+    TPEX_D --> TPEX
+    Spiders --> PIPELINES
+    PIPELINES --> PG
+    PREMIUM --> PG
+    TECH --> PG
+    RISK --> PG
+    CHIP --> PG
+    FILTER --> PG
+    RISK --> RULES
+    TECH --> RULES
+    MARKDOWN --> FORMATTER
+    TELEGRAM --> FORMATTER
 ```
-┌─────────────────────────────┐
-│  Go Scheduler (排程層)       │  Cron 0 10 * * 1-5 + Webhook
-│  Port 8080 (HTTP)           │  非阻塞 (~1ms 回應)
-└────────────┬────────────────┘
-             │
-        trigger
-             │
-             ▼
-┌─────────────────────────────┐
-│  Python Pipeline (處理層)    │  Step 1: 爬蟲 (collect-only)
-│  4 Spiders + Validator       │  Step 2: 驗證 (24 規則)
-│  + Cleaner                  │  Step 2.5: 寫入 (if PASS)
-└────────────┬────────────────┘  Step 3: 清洗 (dedup+enrich)
-             │
-        exec
-             │
-             ▼
-┌─────────────────────────────┐
-│  PostgreSQL 14 (存儲層)      │  stock_master
-│  4 Tables + Logs            │  stock_daily
-└─────────────────────────────┘  cb_master
-                                  tpex_cb_daily
-```
+
+### BrokerBreakdownSpider 執行流程（含 Captcha OCR）
+
+```mermaid
+sequenceDiagram
+    participant U as run_daily.py
+    participant BS as BrokerBreakdownSpider
+    participant BSR as BsrClient
+    participant OCR as OcrSolver
+    participant WEB as bsr.twse.com.tw
+    participant PG as PostgreSQL
+
+    U->>BS: fetch_broker_breakdown_batch(date, symbols)
+    
+    loop for each symbol
+        BS->>BSR: fetch_broker_data(symbol)
+        
+        loop attempt 1..max_retries
+            BSR->>BSR: _solve_captcha()
+            BSR->>WEB: GET bsMenu.aspx
+            WEB-->>BSR: HTML + captcha GUID
+            BSR->>WEB: GET CaptchaImage.aspx
+            WEB-->>BSR: PNG image bytes
+            BSR->>OCR: solve_with_confidence(img)
+            OCR->>OCR: ddddocr.classification<br/>(probability=True)
+            OCR-->>BSR: captcha_text, confidence
+            
+            alt confidence < threshold
+                BSR->>BSR: continue (重抓 captcha)
+            end
+            
+            BSR->>WEB: POST bsMenu.aspx<br/>(symbol + captcha)
+            WEB-->>BSR: HTML 結果
+            
+            alt 驗證碼錯誤
+                BSR->>BSR: continue (重試)
+            else 成功
+                BSR->>BSR: _parse_result()
+                BSR-->>BS: [broker records]
+            end
+        end
+    end
+    
+    BS-->>PG: BrokerBreakdownItem (batch write)
+
 
 **性能指標**:
 | 指標 | 數值 |
@@ -152,32 +266,21 @@ docker-compose down -v  # 刪除數據卷
 
 ## 📚 架構文檔
 
-### 完整系統架構 (970 行)
-📄 **位置**: `docs/agent_context/phase2_raw_data_validation/SYSTEM_ARCHITECTURE.md`
+> 本 README.md 的架構圖（Mermaid diagram）為目前最新版本。  
+> 歷史版本架構文檔位於 `docs/agent_context/` 各階段目錄下。
 
-內容涵蓋：
-- 系統概覽與邊界定義
-- 3 層架構詳解 (排程 → 處理 → 存儲)
-- 4 種數據流路徑 (正常、驗證失敗、清洗、Webhook)
-- 核心組件設計 (Spider、Validator、Scheduler、Cleaner)
-- 環境變量完整清單
-- 部署架構與性能指標
-- 10+ 故障排查指南
+### 快速參考
+- **模組架構圖**: 見上方「完整模組架構」Mermaid 圖
+- **BSR 執行流程**: 見上方「BrokerBreakdownSpider 執行流程」循序圖
+- **EOD 4 階段管道**: 見 `src/pipeline/eod_pipeline.py`
 
-### 架構梳理摘要 (320 行)
-📄 **位置**: `SYSTEM_ARCHITECTURE_SUMMARY.md`
-
-快速參考指南：
-- 架構圖與流程圖
-- 工作流決策矩陣
-- 性能數據速查表
-- 配置要點速查
-- 故障排查速查表
-
-### 其他規劃文檔
-- `docs/agent_context/phase2_raw_data_validation/DEVELOPMENT_PLAN.md` - 設計思路
-- `docs/agent_context/phase2_raw_data_validation/DELIVERY_SUMMARY.md` - 交付摘要
-- `docs/agent_context/phase2_raw_data_validation/README.md` - 驗證層入口
+### 設計文檔歷史
+| 階段 | 位置 | 內容 |
+|------|------|------|
+| Phase 1-3 | `docs/agent_context/phase1-3/` | 基礎爬蟲 + ETL |
+| Phase 2 | `docs/agent_context/phase2_raw_data_validation/` | 驗證層設計 |
+| Phase 4 | `docs/agent_context/phase4_eod_analysis/` | EOD 分析層設計 |
+| Phase Filter | `docs/agent_context/phase_filter_expiry/` | InstrumentFilter 設計 |
 
 ---
 
@@ -456,27 +559,48 @@ bcas_quant/
 ├── .env.example                   # 環境變量模板
 │
 ├── src/
-│   ├── run_daily.py              # Pipeline 主入口
-│   ├── spiders/                  # 4 個爬蟲
-│   │   ├── stock_master.py
-│   │   ├── stock_daily.py
-│   │   ├── cb_master.py
-│   │   └── tpex_cb_daily.py
+│   ├── run_daily.py              # Pipeline 主入口 (Go 排程器調用)
+│   ├── run_eod_analysis.py       # EOD 盤後分析入口
+│   ├── pipeline/                 # 管道層
+│   │   └── eod_pipeline.py       #   EOD 4 階段管道
+│   ├── spiders/                  # 5 個爬蟲
+│   │   ├── stock_master_spider.py
+│   │   ├── stock_daily_spider.py
+│   │   ├── cb_master_spider.py
+│   │   ├── tpex_cb_daily_spider.py
+│   │   ├── broker_breakdown_spider.py   # BSR 券商分點
+│   │   ├── bsr_client.py                # BSR 網站驅動 (captcha/submit/parse)
+│   │   └── ocr_solver.py                # OCR 抽象層 (ddddocr 封裝)
+│   ├── analytics/               # 分析層
+│   │   ├── premium_calculator.py
+│   │   ├── technical_analyzer.py
+│   │   ├── risk_assessor.py
+│   │   ├── chip_profiler.py
+│   │   ├── instrument_filter.py
+│   │   ├── models.py
+│   │   └── rules/
+│   │       ├── risk_rules.py
+│   │       └── technical_rules.py
 │   ├── validators/               # 驗證層 (24 規則)
 │   │   ├── checker.py
 │   │   ├── report.py
 │   │   └── rules/
 │   ├── framework/                # 框架
-│   │   └── base_spider.py
+│   │   ├── base_spider.py
+│   │   ├── base_item.py
+│   │   └── pipelines.py
+│   ├── reporters/                # 報表層
+│   │   ├── markdown_reporter.py
+│   │   └── formatter.py
+│   ├── notifiers/                # 通知層
+│   │   ├── telegram_notifier.py
+│   │   └── terminal_notifier.py
 │   ├── etl/                      # 清洗層
 │   │   ├── cleaner.py
-│   │   └── trading_calendar.py
+│   │   └── run_cleaner.py
 │   ├── db/                       # 數據庫
-│   │   └── init.sql
-│   └── tests/                    # 127 單元測試
-│       ├── test_spiders.py
-│       ├── test_validators.py
-│       └── test_e2e.py
+│   │   └── migration_*.sql
+│   └── tests/                    # 698+ 單元測試
 │
 ├── scheduler/                     # Go 排程器
 │   ├── cmd/scheduler/
