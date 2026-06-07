@@ -43,9 +43,5 @@ jobs:
       - name: Show coverage summary
         if: always()
         run: |
-          COV=$(python -c "
-            import xml.etree.ElementTree as ET
-            tree = ET.parse('coverage.xml')
-            print(f'{float(tree.getroot().attrib[\"line-rate\"]) * 100:.1f}')
-          ")
+          COV=$(python -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage.xml'); print(f'{float(tree.getroot().attrib[\"line-rate\"]) * 100:.1f}')")
           echo "## Coverage: ${COV}%"
