@@ -94,9 +94,9 @@ class MarkdownReporter:
                     # close(4), premium(5), risk(6), final_rating(7), signal(8)
                     symbol, stock_name, cb_code, cb_name = row[0], row[1], row[2], row[3]
                     close, premium, risk, signal = row[4], row[5], row[6], row[8]
-                    premium_str = f"{float(premium)*100:.2f}%" if premium else "N/A"
-                    risk_str = f"{float(risk):.1f}%" if risk else "N/A"
-                    close_str = f"{float(close):.2f}" if close else "N/A"
+                    premium_str = f"{float(premium)*100:.2f}%" if premium is not None else "N/A"
+                    risk_str = f"{float(risk):.1f}%" if risk is not None else "N/A"
+                    close_str = f"{float(close):.2f}" if close is not None else "N/A"
                     signal_str = signal or "HOLD"
                     lines.append(
                         f"| {symbol} | {stock_name} | {cb_code} | {cb_name} "

@@ -59,6 +59,14 @@ aws*
 .gcloud
 .boto
 netrwhist
-*~
-*.swp
-.DS_Store
+
+# Coverage / test artifacts
+.coverage
+htmlcov/
+
+# Generated docs site files
+docs/_housekeeping_summary.md
+docs/changelog/
+docs/index.md
+docs/reports/
+mkdocs.yml
