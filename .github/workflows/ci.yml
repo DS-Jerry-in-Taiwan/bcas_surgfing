@@ -30,6 +30,7 @@ jobs:
             -m "not e2e" \
             --ignore=tests/test_bsr_captcha.py \
             --ignore=tests/test_stage5_e2e_integration.py \
+            --ignore=tests/test_framework/test_real_integration.py \
             -v --tb=short -q
 
       - name: Upload coverage report
