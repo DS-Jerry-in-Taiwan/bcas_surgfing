@@ -1,11 +1,10 @@
 """
 EOD Pipeline - 盤後分析主管道
 
-依序執行 4 階段 (非阻斷設計，單一階段失敗不影響後續):
-  1. 爬蟲階段 - 執行 run_daily 爬蟲
-  2. 分析階段 - PremiumCalculator + TechnicalAnalyzer
-  3. 風險階段 - RiskAssessor (含 ChipProfiler)
-  4. 報表階段 - MarkdownReporter + Notifiers (Telegram/Terminal)
+依序執行 3 階段 (非阻斷設計，單一階段失敗不影響後續):
+  1. 分析階段 - PremiumCalculator + TechnicalAnalyzer
+  2. 風險階段 - RiskAssessor (含 ChipProfiler)
+  3. 報表階段 - MarkdownReporter + Notifiers (Telegram/Terminal)
 
 用法:
     from src.pipeline.eod_pipeline import EODPipeline
@@ -22,22 +21,10 @@ class EODPipeline:
 
     def __init__(self):
         self.stages = {
-            1: ("爬蟲階段", self._run_spiders),
-            2: ("分析階段", self._run_analytics),
-            3: ("風險階段", self._run_risk),
-            4: ("報表階段", self._run_reporting),
+            1: ("分析階段", self._run_analytics),
+            2: ("風險階段", self._run_risk),
+            3: ("報表階段", self._run_reporting),
         }
-
-    def _run_spiders(self, date: str):
-        """Stage 1: 爬蟲 (呼叫 run_daily.spiders + flush)
-
-        Args:
-            date: 日期字串，此階段未使用 (從 run_daily 內部取得)
-        """
-        from run_daily import step_spiders, flush_pipelines
-        results, records, pipelines = step_spiders()
-        flush_pipelines(pipelines)
-        return results
 
     def _run_analytics(self, date: str):
         """Stage 2: 分析 (PremiumCalculator + TechnicalAnalyzer)
@@ -94,12 +81,11 @@ class EODPipeline:
 
         return report
 
-    def run(self, date: str = None, stage: int = None):
+    def run(self, date: str = None):
         """執行 EOD Pipeline
 
         Args:
             date: 日期 (YYYY-MM-DD)，預設今天
-            stage: 指定只執行某一階段 (1-4)，預設 None 表示全部執行
         """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -107,14 +93,11 @@ class EODPipeline:
         logger.info(f"🚀 EOD Pipeline 開始 - {date}")
 
         for s, (name, func) in sorted(self.stages.items()):
-            if stage is not None and s != stage:
-                continue
-
-            logger.info(f"[{s}/4] {name} 開始")
+            logger.info(f"[{s}/3] {name} 開始")
             try:
                 result = func(date)
-                logger.info(f"[{s}/4] {name} 完成 ✅")
+                logger.info(f"[{s}/3] {name} 完成 ✅")
             except Exception as e:
-                logger.error(f"[{s}/4] {name} 失敗 ❌: {e}")
+                logger.error(f"[{s}/3] {name} 失敗 ❌: {e}")
 
         logger.info(f"🏁 EOD Pipeline 完成 - {date}")
