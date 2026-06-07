@@ -10,6 +10,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cbas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,10 +32,18 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run tests with coverage
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: ${{ job.services.postgres.ports[5432] }}
         run: |
           python -m pytest tests/ \
             --cov=src \
@@ -30,7 +53,6 @@ jobs:
             -m "not e2e" \
             --ignore=tests/test_bsr_captcha.py \
             --ignore=tests/test_stage5_e2e_integration.py \
-            --ignore=tests/test_framework/test_real_integration.py \
             -v --tb=short -q
 
       - name: Upload coverage report
