@@ -16,6 +16,7 @@ psycopg2-binary
 # Testing
 pytest>=8.0.0
 pytest-cov>=6.0.0
+pytest-httpserver>=1.0.0
 
 # Type Checking
 mypy
