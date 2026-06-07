@@ -48,7 +48,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          python -m pytest tests/test_framework/ -q --tb=short
+          python -m pytest tests/test_framework/ -q --tb=short -m "not e2e"
 
       - name: Run validation (validate-only mode)
         env:
