@@ -23,7 +23,7 @@ mypy
 types-requests
 
 # OCR (BSR captcha solving)
-dddddocr>=1.6.1
+ddddocr>=1.6.1
 
 # Environment
 python-dotenv
