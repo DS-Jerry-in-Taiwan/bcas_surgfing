@@ -24,7 +24,9 @@ from pathlib import Path
 
 import psycopg2
 
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+_THIS_DIR = os.path.abspath(os.path.dirname(__file__))
+sys.path.insert(0, _THIS_DIR)
+sys.path.insert(0, os.path.abspath(os.path.join(_THIS_DIR, "..")))
 
 # Setup logging
 logging.basicConfig(
