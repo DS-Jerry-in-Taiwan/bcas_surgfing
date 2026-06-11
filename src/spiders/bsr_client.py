@@ -72,8 +72,8 @@ class BsrClient:
     RECOVERY_TIMEOUT = 60
 
     def __init__(self, max_retries: int = 3, request_interval: float = 2.0,
-                 confidence_threshold: float = 0.1,
-                 use_voting: bool = False) -> None:
+                 confidence_threshold: float = 0.3,
+                 use_voting: bool = True) -> None:
         """
         初始化 BsrClient
 
