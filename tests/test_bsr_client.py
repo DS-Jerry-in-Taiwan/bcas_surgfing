@@ -1316,14 +1316,14 @@ class TestBsrClientSolveCaptcha:
 
     @patch.object(BsrClient, "_refresh_session")
     @patch.object(BsrClient, "_get_captcha_image")
-    @patch.object(OcrSolver, "solve_with_confidence")
+    @patch.object(OcrSolver, "solve_with_voting")
     def test_solve_captcha_full_flow(
         self, mock_ocr_solve, mock_get_img, mock_refresh
     ):
-        """refresh → download → OCR 完整流程"""
+        """refresh → download → OCR 完整流程（use_voting=True 為預設）"""
         mock_refresh.return_value = True
         mock_get_img.return_value = b"imgdata"
-        mock_ocr_solve.return_value = ("wxyz", 0.95)
+        mock_ocr_solve.return_value = ("wxyz", 0.95, {})
 
         client = BsrClient()
         text, confidence = client._solve_captcha()
